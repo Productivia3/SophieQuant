@@ -2,16 +2,15 @@
 //! El build real corre en un hilo aparte con su propia conexión SQLite;
 //! los progreso se emiten por el canal "build-event" hacia la UI.
 
+// En release la app es una aplicacion de ventana: sin consola detras.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod commands;
 mod engine;
 mod export;
-
 use parking_lot::Mutex;
 use rusqlite::Connection;
 use tauri::Manager;
-
 use commands::AppState;
-
 fn main() {
     tauri::Builder::default()
         // plugin de dialogo: selector de ficheros real (importar CSV, guardar exportaciones)
@@ -26,7 +25,6 @@ fn main() {
             engine::datastore::init_schema(&conn).expect("init schema");
             commands::seed_symbols(&conn).ok();
             commands::seed_templates(&conn).ok();
-
             app.manage(AppState {
                 db: Mutex::new(conn),
                 db_path: db_path.to_string_lossy().to_string(),
