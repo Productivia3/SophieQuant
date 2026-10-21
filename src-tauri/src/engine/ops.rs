@@ -135,6 +135,152 @@ pub fn corr_matrix(seqs: &[Vec<f64>]) -> Vec<Vec<f64>> {
     m
 }
 
+
+/// ── Ponderacion de cartera ────────────────────────────────────────────
+
+/// Modelos de ponderacion disponibles.
+pub const MODELS: [&str; 4] = ["equal_weight", "equal_vol", "risk_parity", "custom"];
+
+/// Etiqueta legible de cada modelo.
+pub fn model_label(m: &str) -> &'static str {
+    match m {
+        "equal_weight" => "Equiponderado",
+        "equal_vol" => "Inverso a volatilidad",
+        "risk_parity" => "Paridad de riesgo",
+        "custom" => "Personalizado",
+        _ => "Equiponderado",
+    }
+}
+
+/// Volatilidad de una serie de equity: desviacion tipica de sus retornos.
+pub fn volatility(eq: &[f64]) -> f64 {
+    let rets = returns_of(eq);
+    if rets.len() < 2 { return 0.0 }
+    let m = mean(&rets);
+    let var = rets.iter().map(|r| (r - m) * (r - m)).sum::<f64>() / (rets.len() as f64 - 1.0);
+    var.max(0.0).sqrt()
+}
+
+/// Matriz de covarianzas de las series de equity (sobre retornos).
+pub fn cov_matrix(seqs: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    let rets: Vec<Vec<f64>> = seqs.iter().map(|e| returns_of(e)).collect();
+    let n = rets.len();
+    let mut m = vec![vec![0.0; n]; n];
+    for i in 0..n {
+        for j in 0..n {
+            let (a, b) = (&rets[i], &rets[j]);
+            let k = a.len().min(b.len());
+            if k < 2 { continue }
+            let ma = mean(&a[..k]);
+            let mb = mean(&b[..k]);
+            let mut s = 0.0;
+            for t in 0..k { s += (a[t] - ma) * (b[t] - mb); }
+            m[i][j] = s / (k as f64 - 1.0);
+        }
+    }
+    m
+}
+
+/// Pesos de cartera segun el modelo.
+///
+/// - `equal_weight`: 1/N.
+/// - `equal_vol`: inverso a la volatilidad (riesgo repartido si no hay correlacion).
+/// - `risk_parity`: cada miembro aporta el mismo riesgo, resolviendo las
+///   contribuciones de riesgo de forma iterativa.
+/// - `custom`: los pesos que pasa el usuario (normalizados).
+pub fn weights(model: &str, seqs: &[Vec<f64>], custom: &[f64]) -> Vec<f64> {
+    let n = seqs.len();
+    if n == 0 { return vec![] }
+    match model {
+        "custom" if custom.len() == n => {
+            let neg = custom.iter().any(|w| *w < 0.0);
+            let base: Vec<f64> = if neg { vec![0.0; n] } else { custom.to_vec() };
+            normalize(&base)
+        }
+        "equal_vol" => {
+            let vol: Vec<f64> = seqs.iter().map(|s| volatility(s)).collect();
+            let inv: Vec<f64> = vol.iter().map(|v| if *v > 1e-12 { 1.0 / v } else { 0.0 }).collect();
+            let total: f64 = inv.iter().sum();
+            if total <= 0.0 { vec![1.0 / n as f64; n] } else { inv.iter().map(|w| w / total).collect() }
+        }
+        "risk_parity" => risk_parity(seqs),
+        _ => vec![1.0 / n as f64; n],
+    }
+}
+
+fn normalize(w: &[f64]) -> Vec<f64> {
+    let total: f64 = w.iter().sum();
+    if total <= 0.0 {
+        let n = w.len().max(1) as f64;
+        return vec![1.0 / n; w.len()];
+    }
+    w.iter().map(|x| x / total).collect()
+}
+
+/// Paridad de riesgo: pesos tales que cada miembro aporta el mismo riesgo.
+///
+/// Se resuelve con el punto fijo clasico: en cada paso se escala cada peso en
+/// funcion de como se aleja su contribucion del objetivo.
+fn risk_parity(seqs: &[Vec<f64>]) -> Vec<f64> {
+    let n = seqs.len();
+    if n == 0 { return vec![] }
+    if n == 1 { return vec![1.0]; }
+    let cov = cov_matrix(seqs);
+    let mut w = vec![1.0 / n as f64; n];
+    for _ in 0..2000 {
+        // varianza de cartera
+        let mut var_p = 0.0;
+        for i in 0..n { for j in 0..n { var_p += w[i] * cov[i][j] * w[j]; } }
+        let sigma_p = var_p.max(0.0).sqrt();
+        if sigma_p <= 1e-12 { break; }
+        let target = sigma_p / n as f64;
+        let mut w_new = w.clone();
+        for i in 0..n {
+            let mut c = 0.0;
+            for j in 0..n { c += cov[i][j] * w[j]; }
+            let rc = w[i] * c;              // contribucion al riesgo de i
+            if rc.abs() > 1e-12 {
+                w_new[i] = w[i] * (target / rc);
+            }
+        }
+        let w_new = normalize(&w_new);
+        let cambio: f64 = w_new.iter().zip(w.iter()).map(|(a, b)| (a - b).abs()).sum();
+        w = w_new;
+        if cambio < 1e-10 { break; }
+    }
+    w
+}
+
+/// Equity combinada con los pesos dados (se alinea al minimo comun de longitud).
+pub fn weighted_equity(seqs: &[Vec<f64>], w: &[f64]) -> Vec<f64> {
+    if seqs.is_empty() { return vec![] }
+    let n = seqs.iter().map(|s| s.len()).min().unwrap_or(0);
+    if n == 0 { return vec![] }
+    (0..n)
+        .map(|i| seqs.iter().enumerate().map(|(k, s)| s[i] * w.get(k).copied().unwrap_or(0.0)).sum())
+        .collect()
+}
+
+/// Contribucion al riesgo de cada miembro (en %), con los pesos dados.
+pub fn risk_contributions(seqs: &[Vec<f64>], w: &[f64]) -> Vec<f64> {
+    let n = seqs.len();
+    if n == 0 { return vec![] }
+    let cov = cov_matrix(seqs);
+    let mut var_p = 0.0;
+    for i in 0..n { for j in 0..n { var_p += w[i] * cov[i][j] * w[j]; } }
+    let sigma_p = var_p.max(0.0).sqrt();
+    if sigma_p <= 1e-12 { return vec![0.0; n]; }
+    let mut rc = vec![0.0; n];
+    for i in 0..n {
+        let mut c = 0.0;
+        for j in 0..n { c += cov[i][j] * w[j]; }
+        rc[i] = w[i] * c / sigma_p;
+    }
+    let total: f64 = rc.iter().sum();
+    if total.abs() < 1e-12 { return vec![0.0; n]; }
+    rc.iter().map(|r| r / total * 100.0).collect()
+}
+
 /// Equity combinada = media por índice (alineada al mínimo común de longitud).
 pub fn mean_equity(seqs: &[Vec<f64>]) -> Vec<f64> {
     if seqs.is_empty() { return vec![] }
@@ -999,6 +1145,81 @@ mod tests {
         let r = verdict_mercados(&mercados);
         assert_eq!(r["verdict"], "pending");
         assert_eq!(r["mercadosConDatos"], 0);
+    }
+
+
+    /// El equiponderado reparte igual y los pesos suman 1.
+    #[test]
+    fn el_equiponderado_reparte_igual() {
+        let eq = vec![serie_equity(200, 0.01), serie_equity(200, 0.02)];
+        let w = weights("equal_weight", &eq, &[]);
+        assert_eq!(w.len(), 2);
+        assert!((w[0] - 0.5).abs() < 1e-9);
+        assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+    }
+
+    /// El inverso a volatilidad da mas peso a la serie menos volatil.
+    #[test]
+    fn el_inverso_a_volatilidad_pesa_mas_a_la_serie_estable() {
+        let tranquila = serie_equity(300, 0.002);
+        let nerviosa = serie_equity(300, 0.05);
+        let eq = vec![tranquila.clone(), nerviosa];
+        let w = weights("equal_vol", &eq, &[]);
+        assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        assert!(w[0] > w[1], "la serie tranquila debe pesar mas: {w:?}");
+    }
+
+    /// La paridad de riesgo iguala la contribucion al riesgo de cada miembro.
+    #[test]
+    fn la_paridad_de_riesgo_iguala_contribuciones() {
+        let eq = vec![serie_equity(400, 0.01), serie_equity(400, 0.03)];
+        let w = weights("risk_parity", &eq, &[]);
+        assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-9);
+        let rc = risk_contributions(&eq, &w);
+        // las contribuciones se reparten (no tiene que ser exacto, pero si parecidas)
+        assert!((rc[0] - rc[1]).abs() < 25.0, "contribuciones: {rc:?}");
+        assert!((rc[0] + rc[1] - 100.0).abs() < 1.0, "deben sumar 100: {rc:?}");
+    }
+
+    /// Los pesos personalizados se normalizan y no aceptan negativos.
+    #[test]
+    fn los_pesos_personalizados_se_normalizan() {
+        let eq = vec![serie_equity(100, 0.01), serie_equity(100, 0.01)];
+        let w = weights("custom", &eq, &[2.0, 2.0]);
+        assert!((w[0] - 0.5).abs() < 1e-9);
+        // negativos -> se ignoran (reparto equiponderado en vez de pesos invalidos)
+        let w2 = weights("custom", &eq, &[-1.0, 1.0]);
+        assert!(w2.iter().all(|x| *x >= 0.0), "pesos negativos: {w2:?}");
+    }
+
+    /// La equity combinada con pesos no es la media simple cuando hay pesos.
+    #[test]
+    fn la_equity_ponderada_respeta_los_pesos() {
+        let a = serie_equity(100, 0.0);           // plana
+        let b = serie_equity(100, 0.0);
+        let mut b2 = b.clone();
+        for v in b2.iter_mut() { *v *= 2.0; }
+        let eq = vec![a, b2];
+        let combinada = weighted_equity(&eq, &[0.5, 0.5]);
+        let media = mean_equity(&eq);
+        assert!((combinada[50] - media[50]).abs() < 1e-9);
+        // con todo el peso en la primera, la combinada es esa serie
+        let solo_a = weighted_equity(&eq, &[1.0, 0.0]);
+        assert!((solo_a[50] - eq[0][50]).abs() < 1e-9);
+    }
+
+    /// Serie de equity sintetica con la volatilidad pedida.
+    fn serie_equity(n: usize, vol: f64) -> Vec<f64> {
+        let mut out = Vec::with_capacity(n);
+        let mut v = 10_000.0;
+        let mut s = 12345u64;
+        for i in 0..n {
+            s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+            let r = ((s >> 33) as f64 / 2_000_000_000.0) - 0.5;
+            v *= 1.0 + r * vol;
+            out.push(v);
+        }
+        out
     }
 
     #[test]

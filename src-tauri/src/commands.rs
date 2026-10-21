@@ -1048,6 +1048,145 @@ pub fn run_mc_suite(state: State<AppState>, strategy_id: i64, tests: Vec<String>
     Ok(v)
 }
 
+// ── Cartera: ponderacion y persistencia ────────────────────────────
+
+/// Calculo de cartera con un modelo de ponderacion.
+///
+/// Devuelve por miembro: volatilidad, peso, peso en % y contribucion al riesgo;
+/// y el resumen de la cartera (volatilidad, drawdown maximo, beneficio neto).
+fn portfolio_calc(
+    db: &Connection,
+    strategy_ids: &[i64],
+    model: &str,
+    custom: &[f64],
+) -> serde_json::Value {
+    let mut ids: Vec<i64> = Vec::new();
+    let mut seqs: Vec<Vec<f64>> = Vec::new();
+    for id in strategy_ids {
+        if let Some(eq) = ops::stored_equity(db, *id) {
+            ids.push(*id);
+            seqs.push(eq);
+        }
+    }
+    let n = ids.len();
+    if n == 0 {
+        return serde_json::json!({ "model": model, "miembros": [], "combinada": serde_json::Value::Null });
+    }
+    let matrix = ops::corr_matrix(&seqs);
+    let w = ops::weights(model, &seqs, custom);
+    let rc = ops::risk_contributions(&seqs, &w);
+    let combinada = ops::weighted_equity(&seqs, &w);
+    let dd = ops::max_dd_pct(&combinada);
+    let vol = ops::volatility(&combinada);
+
+    let mut miembros: Vec<serde_json::Value> = Vec::new();
+    for (k, id) in ids.iter().enumerate() {
+        let m = ops::stored_metrics(db, *id);
+        let nombre: String = db
+            .query_row("select name from strategies where id = ?1", q![*id], |r| r.get(0))
+            .unwrap_or_else(|_| format!("#{id}"));
+        let avg_corr = if n > 1 {
+            let off: Vec<f64> = matrix[k].iter().enumerate()
+                .filter(|(i, _)| *i != k).map(|(_, v)| *v).collect();
+            (ops::mean(&off)).max(0.0)
+        } else { 0.0 };
+        miembros.push(serde_json::json!({
+            "strategyId": id,
+            "nombre": nombre,
+            "metrics": m.as_ref().map(ops::metrics_json),
+            "correlation": avg_corr,
+            "volatility": (ops::volatility(&seqs[k]) * 100.0 * 100.0).round() / 100.0,
+            "weight": (w[k] * 1000.0).round() / 1000.0,
+            "weightPct": (w[k] * 100.0 * 10.0).round() / 10.0,
+            "riskContribution": (rc[k] * 10.0).round() / 10.0,
+        }));
+    }
+    // metricas de la cartera combinada
+    let net = if let Some(first) = seqs.first() {
+        let ini = first.first().copied().unwrap_or(0.0);
+        let fin = combinada.last().copied().unwrap_or(0.0);
+        ((fin - ini) * 100.0).round() / 100.0
+    } else { 0.0 };
+    serde_json::json!({
+        "model": model,
+        "modelLabel": ops::model_label(model),
+        "miembros": miembros,
+        "combinada": {
+            "equity": combinada,
+            "maxDD": (dd * 10.0).round() / 10.0,
+            "netProfit": net,
+            "volatility": (vol * 100.0 * 100.0).round() / 100.0,
+        },
+        "portfolioVol": (vol * 100.0 * 100.0).round() / 100.0,
+    })
+}
+
+/// Calcula la cartera con el modelo pedido y **guarda la corrida**.
+#[tauri::command]
+pub fn run_portfolio_weighting(
+    state: State<AppState>,
+    strategy_ids: Vec<i64>,
+    model: Option<String>,
+    custom_weights: Option<Vec<f64>>,
+) -> Result<serde_json::Value, String> {
+    let m = model.unwrap_or_else(|| "equal_vol".to_string());
+    if !ops::MODELS.contains(&m.as_str()) {
+        return Err(format!("modelo de ponderacion desconocido: '{m}'"));
+    }
+    let custom = custom_weights.unwrap_or_default();
+    let db = state.db.lock();
+    let calc = portfolio_calc(&db, &strategy_ids, &m, &custom);
+    let ids: Vec<i64> = calc["miembros"]
+        .as_array()
+        .map(|ms| ms.iter().filter_map(|x| x["strategyId"].as_i64()).collect())
+        .unwrap_or_default();
+    let pesos: Vec<f64> = calc["miembros"]
+        .as_array()
+        .map(|ms| ms.iter().filter_map(|x| x["weight"].as_f64()).collect())
+        .unwrap_or_default();
+    let now = now_ts();
+    db.execute(
+        "insert into portfolio_runs (model, strategy_ids, weights, metrics, detail, created_at)
+         values (?1, ?2, ?3, ?4, ?5, ?6)",
+        q![
+            m,
+            serde_json::to_string(&ids).unwrap_or_default(),
+            serde_json::to_string(&pesos).unwrap_or_default(),
+            serde_json::to_string(&calc["combinada"]).unwrap_or_default(),
+            serde_json::to_string(&calc["miembros"]).unwrap_or_default(),
+            now,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let run_id = db.last_insert_rowid();
+    drop(db);
+    Ok(serde_json::json!({ "runId": run_id, "resultado": calc }))
+}
+
+/// Historial de corridas de cartera.
+#[tauri::command]
+pub fn list_portfolio_runs(state: State<AppState>, limit: Option<usize>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock();
+    let lim = limit.unwrap_or(50).clamp(1, 500);
+    let mut stmt = db.prepare(
+        "select id, model, strategy_ids, weights, metrics, created_at
+         from portfolio_runs order by id desc limit ?1").map_err(|e| e.to_string())?;
+    let rows = stmt.query_map(q![lim as i64], |r| {
+        Ok(serde_json::json!({
+            "id": r.get::<_, i64>(0)?,
+            "model": r.get::<_, String>(1)?,
+            "modelLabel": ops::model_label(&r.get::<_, String>(1)?),
+            "strategyIds": r.get::<_, Option<String>>(2)?.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()).unwrap_or(serde_json::Value::Null),
+            "weights": r.get::<_, Option<String>>(3)?.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()).unwrap_or(serde_json::Value::Null),
+            "metrics": r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()).unwrap_or(serde_json::Value::Null),
+            "createdAt": r.get::<_, i64>(5)?,
+        }))
+    }).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows { out.push(r.map_err(|e| e.to_string())?); }
+    Ok(serde_json::json!({ "rows": out }))
+}
+
 #[tauri::command]
 pub fn get_correlation_matrix(state: State<AppState>, strategy_ids: Vec<i64>) -> Result<serde_json::Value, String> {
     let db = state.db.lock();

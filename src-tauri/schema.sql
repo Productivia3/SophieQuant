@@ -124,3 +124,15 @@ create table if not exists analysis_runs (
 );
 create index if not exists idx_analysis_strategy on analysis_runs(strategy_id, kind, id desc);
 create index if not exists idx_analysis_kind on analysis_runs(kind, id desc);
+
+-- Corridas de cartera: modelo de ponderacion, pesos y metricas resultantes.
+create table if not exists portfolio_runs (
+  id integer primary key autoincrement,
+  model text not null check (model in ('equal_weight','equal_vol','risk_parity','custom')),
+  strategy_ids jsonb not null,
+  weights jsonb not null,
+  metrics jsonb not null,
+  detail jsonb,
+  created_at integer not null default (unixepoch())
+);
+create index if not exists idx_portfolio_runs on portfolio_runs(id desc);

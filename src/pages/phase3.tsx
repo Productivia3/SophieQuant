@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Play, Repeat, Layers, Ruler, ArrowUp, ArrowDown, X, Grid3x3, FolderKanban, PieChart } from 'lucide-react'
 import { api } from '../lib/api'
+import type { PortfolioCalc, WeightingModel } from '../lib/api'
 import type {
   CorrelationMatrix, ImproverResult, OptimizerResult, PortfolioEquity,
   RetestResult, SppResult,
@@ -634,6 +635,9 @@ export function S18Portfolio() {
   const [corr, setCorr] = useState<CorrelationMatrix | null>(null)
   const [eq, setEq] = useState<PortfolioEquity | null>(null)
   const [names, setNames] = useState<Record<number, string>>({})
+  const [model, setModel] = useState<WeightingModel>('equal_vol')
+  const [custom, setCustom] = useState<Record<number, number>>({})
+  const [pesos, setPesos] = useState<PortfolioCalc | null>(null)
 
   useEffect(() => {
     api.listBank({}).then(rs => {
@@ -648,10 +652,14 @@ export function S18Portfolio() {
   async function run() {
     if (selIds.length < 2) return
     setBusy(true)
-    const [c, e] = await Promise.all([api.getCorrelationMatrix(selIds), api.getPortfolioEquity(selIds)])
-    setCorr(c); setEq(e); setBusy(false)
+    const customWeights = selIds.map(id => custom[id] ?? 1)
+    const [c, e, w] = await Promise.all([
+      api.getCorrelationMatrix(selIds),
+      api.getPortfolioEquity(selIds),
+      api.runPortfolioWeighting(selIds, model, customWeights),
+    ])
+    setCorr(c); setEq(e); setPesos(w.resultado); setBusy(false)
   }
-
   const toggle = (id: number) =>
     setSelIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
 
@@ -685,6 +693,66 @@ export function S18Portfolio() {
         </div>
 
         <div className="min-w-0 space-y-4">
+          <section className="rounded-md border border-border bg-surface p-3">
+            <h2 className="mb-2 text-sm font-semibold text-muted">Ponderacion de la cartera</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-muted" htmlFor="pf-modelo">Modelo</label>
+              <select id="pf-modelo" className={selectCls} value={model}
+                aria-label="Modelo de ponderacion"
+                onChange={e => setModel(e.target.value as WeightingModel)}>
+                <option value="equal_vol">Inverso a volatilidad</option>
+                <option value="risk_parity">Paridad de riesgo</option>
+                <option value="equal_weight">Equiponderado</option>
+                <option value="custom">Personalizado</option>
+              </select>
+              {model === 'custom' && (
+                <span className="text-xs text-muted">Pesos propios: editalos en la tabla.</span>
+              )}
+            </div>
+
+            {pesos && (
+              <div className="mt-3">
+                <table className="w-full text-sm" aria-label="Ponderaciones por miembro">
+                  <thead>
+                    <tr className="text-left text-xs text-muted">
+                      <th className="px-2 py-1 font-medium">Miembro</th>
+                      <th className="px-2 py-1 font-medium">Volatilidad</th>
+                      <th className="px-2 py-1 font-medium">Peso</th>
+                      <th className="px-2 py-1 font-medium">Riesgo</th>
+                      {model === 'custom' && <th className="px-2 py-1 font-medium">Peso propio</th>}
+                      <th className="px-2 py-1"><span className="sr-only">Acciones</span></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {pesos.miembros.map(m => (
+                      <tr key={m.strategyId}>
+                        <td className="px-2 py-1 truncate">{m.nombre}</td>
+                        <td className="px-2 py-1 font-mono text-xs">{fmtNum(m.volatility, 2)} %</td>
+                        <td className="px-2 py-1 font-mono text-xs">{fmtNum(m.weightPct, 1)} %</td>
+                        <td className="px-2 py-1 font-mono text-xs">{fmtNum(m.riskContribution, 1)} %</td>
+                        {model === 'custom' && (
+                          <td className="px-2 py-1">
+                            <input type="number" step={0.1} min={0}
+                              className="h-7 w-20 rounded-md border border-border-input bg-surface px-2 font-mono text-xs"
+                              aria-label={`Peso propio de ${m.nombre}`}
+                              value={custom[m.strategyId] ?? 1}
+                              onChange={e => setCustom({ ...custom, [m.strategyId]: +e.target.value })} />
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <p className="mt-2 text-xs text-muted">
+                  Volatilidad de cartera {fmtNum(pesos.portfolioVol, 2)} % · Max DD {fmtNum(pesos.combinada.maxDD, 1)} %
+                  {' '}· Beneficio {fmtMoney(pesos.combinada.netProfit)} · modelo: {pesos.modelLabel}.
+                  En paridad de riesgo todos aportan lo mismo; en inverso a volatilidad pesa mas la que
+                  se mueve menos.
+                </p>
+              </div>
+            )}
+          </section>
+
           {!corr || !eq ? (
             <EmptyState title="Sin análisis de cartera"
               hint="Selecciona 2+ estrategias y corre: verás la correlación entre ellas y la equity combinada." />
@@ -696,7 +764,7 @@ export function S18Portfolio() {
                   <table className="min-w-[560px] text-sm">
                     <thead>
                       <tr className="text-xs text-muted">
-                        <th className="px-2 py-1"></th>
+                        <th className="px-2 py-1"><span className="sr-only">Estrategia</span></th>
                         {corr.ids.map(id => <th key={id} className="px-2 py-1 font-mono">#{id}</th>)}
                       </tr>
                     </thead>
@@ -712,10 +780,13 @@ export function S18Portfolio() {
                                 <span className="inline-flex h-8 w-12 items-center justify-center rounded font-mono text-xs"
                                   aria-label={`Correlación entre ${names[corr.ids[i]]} y ${names[corr.ids[j]]}: ${v}`}
                                   style={{
+                                    // paleta actual: violeta (baja correlacion), ambar
+                                    // (media) y rojo (alta). Texto siempre claro para
+                                    // mantener el contraste AA sobre el tinte.
                                     background: v <= 0.35
-                                      ? `rgba(122,162,255,${alpha * 0.5})`
-                                      : high ? 'rgba(239,90,90,0.35)' : `rgba(250,190,60,${alpha * 0.5})`,
-                                    color: alpha > 0.6 ? 'var(--color-text)' : 'var(--color-text-muted)',
+                                      ? `rgba(157,123,255,${alpha * 0.5})`
+                                      : high ? 'rgba(239,74,82,0.35)' : `rgba(240,192,74,${alpha * 0.5})`,
+                                    color: 'var(--color-text)',
                                   }}>
                                   {v.toFixed(2)}
                                 </span>
@@ -732,7 +803,7 @@ export function S18Portfolio() {
               </div>
 
               <div>
-                <h2 className="mb-2 text-base font-semibold">Equity combinada (media de familias)</h2>
+                <h2 className="mb-2 text-base font-semibold">Equity combinada (con las ponderaciones elegidas)</h2>
                 <div className="rounded-md border border-border bg-surface p-3">
                   <EquityChart series={eq.combined} label="Equity combinada de la cartera" height={220} />
                 </div>

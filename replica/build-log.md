@@ -695,3 +695,31 @@ cerrar. Ahora quedan guardados y **comparables**.
   el flujo completo sin escritorio.
 - **Tests**: 5 de Rust nuevos (49 en total) + 3 e2e nuevos (94 en total).
 - **Cierra** el hueco 3 de `replica/backend.md`.
+
+---
+
+## Ampliacion 3: ponderacion de cartera - 21-10-2026
+
+Tercera ampliacion. La cartera era equiponderada, que es una decision que nadie
+toma: si dos estrategias arriesgan distinto, repartir a partes iguales no es
+"neutral".
+
+- **Motor** (`engine/ops.rs`): `volatility`, `cov_matrix`, `weights` (4 modelos),
+  `risk_parity` (punto fijo sobre contribuciones de riesgo), `weighted_equity` y
+  `risk_contributions` (en %).
+- **Modelos**: equiponderado, inverso a volatilidad, paridad de riesgo y
+  personalizado (los negativos se ignoran, no se propagan).
+- **Comandos**: `run_portfolio_weighting` (calcula y **guarda** la corrida en
+  `portfolio_runs`) y `list_portfolio_runs` (historial). `get_portfolio_results`
+  ahora acepta el modelo, y la pagina de resultados usa el de la ultima corrida
+  para que ambas vistas coincidan.
+- **Interfaz**: panel "Ponderacion de la cartera" con selector de modelo, tabla
+  por miembro (volatilidad, peso, contribucion al riesgo) y resumen de cartera.
+  Con el modelo personalizado se editan los pesos a mano.
+- **Accesibilidad**: el test nuevo destapo dos fallos preexistentes que solo
+  aparecian al ejecutar el analisis (el axe de la pagina no lo hacia antes):
+  celdas del mapa de correlacion con 4,03:1 de contraste y una cabecera vacia.
+  Corregidos, y las celdas seguian usando los azules previos al rebranding: ahora
+  usan la paleta violeta/ambar/rojo.
+- **Tests**: 5 de Rust (equiponderado, inverso a volatilidad, paridad de riesgo,
+  pesos personalizados, equity ponderada) + 2 e2e.

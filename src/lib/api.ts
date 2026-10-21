@@ -643,8 +643,75 @@ export const api = {
     }
   },
 
-  async getPortfolioResults(strategyIds: number[]): Promise<PortfolioResults> {
-    const fetched = await real<PortfolioResults>('get_portfolio_results', { strategyIds })
+  /**
+   * Calcula la cartera con un modelo de ponderacion y guarda la corrida.
+   * Modelos: equiponderado, inverso a volatilidad, paridad de riesgo o
+   * pesos propios.
+   */
+  async runPortfolioWeighting(
+    strategyIds: number[],
+    model: WeightingModel = 'equal_vol',
+    customWeights: number[] = [],
+  ): Promise<{ runId: number; resultado: PortfolioCalc }> {
+    const r = await real<{ runId: number; resultado: PortfolioCalc }>('run_portfolio_weighting', {
+      strategyIds, model, customWeights,
+    })
+    if (r) return r
+    await delay(700)
+    // fake: pesos coherentes con el modelo (la menos volatil pesa mas)
+    const n = strategyIds.length
+    const vols = strategyIds.map((id, i) => 4 + i)
+    const brutos = vols.map((v, i) => {
+      if (model === 'equal_weight') return 1
+      if (model === 'equal_vol') return 1 / Math.max(v, 0.1)
+      if (model === 'risk_parity') return 1 / Math.max(v, 0.1)
+      return customWeights[i] ?? 1
+    })
+    const total = brutos.reduce((a, b) => a + b, 0) || 1
+    const pesos = brutos.map(b => b / total)
+    const miembros: PortfolioMember[] = strategyIds.map((id, i) => {
+      const m = db.strategies.find(s => s.id === id)?.lastRun?.metrics ?? null
+      return {
+        strategyId: id,
+        nombre: db.strategies.find(s => s.id === id)?.name ?? `#${id}`,
+        metrics: m,
+        correlation: 0.2,
+        volatility: vols[i],
+        weight: pesos[i],
+        weightPct: Math.round(pesos[i] * 1000) / 10,
+        riskContribution: Math.round(pesos[i] * 1000) / 10,
+      }
+    })
+    const equity = [10_000, 10_400, 10_250, 10_700, 10_900]
+    return {
+      runId: 1,
+      resultado: {
+        model,
+        modelLabel: model === 'equal_vol' ? 'Inverso a volatilidad' : model === 'risk_parity'
+          ? 'Paridad de riesgo' : model === 'custom' ? 'Personalizado' : 'Equiponderado',
+        miembros,
+        combinada: {
+          equity,
+          maxDD: 6.4,
+          netProfit: equity[equity.length - 1] - equity[0],
+          volatility: 7.2,
+        },
+        portfolioVol: 7.2,
+      },
+    }
+  },
+
+  /** Historial de corridas de cartera. */
+  async listPortfolioRuns(limit = 50): Promise<{ rows: Array<{ id: number; model: string; modelLabel: string; metrics: unknown; createdAt: number }> }> {
+    const r = await real<{ rows: Array<{ id: number; model: string; modelLabel: string; metrics: unknown; createdAt: number }> }>(
+      'list_portfolio_runs', { limit })
+    if (r?.rows) return r
+    await delay(100)
+    return { rows: [] }
+  },
+
+  async getPortfolioResults(strategyIds: number[], model: WeightingModel = 'equal_vol', customWeights: number[] = []): Promise<PortfolioResults> {
+    const fetched = await real<PortfolioResults>('get_portfolio_results', { strategyIds, model, customWeights })
     if (fetched) return fetched
     await delay(900)
     const members = strategyIds.map(id => {
@@ -1132,6 +1199,32 @@ export const VERDICT_LABELS: Record<keyof StrategyVerdicts['checks'], string> = 
   monteCarlo: 'Monte Carlo',
   spp: 'Permutaciones (SPP)',
   perfil: 'Perfil de optimización',
+}
+
+export type WeightingModel = 'equal_weight' | 'equal_vol' | 'risk_parity' | 'custom'
+
+export interface PortfolioMember {
+  strategyId: number
+  nombre: string
+  metrics: Metrics | null
+  correlation: number
+  volatility: number
+  weight: number
+  weightPct: number
+  riskContribution: number
+}
+
+export interface PortfolioCalc {
+  model: WeightingModel
+  modelLabel: string
+  miembros: PortfolioMember[]
+  combinada: {
+    equity: number[]
+    maxDD: number
+    netProfit: number
+    volatility: number
+  }
+  portfolioVol: number
 }
 
 export interface PortfolioEquity {

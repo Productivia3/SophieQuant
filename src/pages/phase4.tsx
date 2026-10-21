@@ -16,6 +16,7 @@ import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
 import { VerdictCard } from '../components/VerdictCard'
 import { HistoryPanel } from '../components/HistoryPanel'
+import type { WeightingModel } from '../lib/api'
 import { TableSkeleton } from '../components/TableSkeleton'
 import { EquityChart } from '../components/EquityChart'
 import { StatCard, StatRow } from '../components/StatCard'
@@ -172,7 +173,10 @@ export function S19PortfolioResults() {
   async function run() {
     if (selIds.length < 2) return
     setBusy(true); setRes(null)
-    setRes(await api.getPortfolioResults(selIds))
+    // usa el modelo de la ultima corrida de cartera guardada, si la hay
+    const hist = await api.listPortfolioRuns(10)
+    const model = (hist.rows[0]?.model as WeightingModel | undefined) ?? 'equal_vol'
+    setRes(await api.getPortfolioResults(selIds, model))
     setBusy(false)
   }
 

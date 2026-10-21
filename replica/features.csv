@@ -31,8 +31,8 @@ Optimization Profile (Rob Pardo),robustness,should,yes,yes,"S15 con curva net-pa
 Multiples periodos OOS con filtrado por periodo,robustness,should,yes,no,el WF actual es una sola pasada; no hay seleccion por periodo OOS
 Custom Projects: workflow multi-paso encadenado,workflows,must,yes,partial,"motor real run_project que encadena pasos (generar, Monte Carlo, guardar) y UI con reordenar y borrar; falta el canvas con drag&drop"
 Custom Analysis (conectar scripts externos Python),workflows,could,yes,no,no hay integracion con Python externo
-Portfolio Master: agrupar estrategias en cartera,portfolio,must,yes,yes,S18 con seleccion de estrategias y equity combinada; motor Rust real (mean_equity)
-Portfolio Composer con modelos de ponderacion,portfolio,should,yes,partial,solo equiponderado; sin modelos de ponderacion ni ajuste de una estrategia nueva a la cartera
+Portfolio Master: agrupar estrategias en cartera,portfolio,must,yes,yes,S18 con seleccion de estrategias y equity combinada; motor Rust real (mean_equity); ademas hay ponderacion por modelo y equity combinada ponderada
+Portfolio Composer con modelos de ponderacion,portfolio,should,yes,yes,"4 modelos reales: equiponderado, inverso a volatilidad, paridad de riesgo (contribuciones iguales, resuelta por punto fijo) y personalizado; la cartera ponderada muestra peso y contribucion al riesgo de cada miembro y la corrida queda guardada (portfolio_runs)"
 Analisis de correlacion entre estrategias,portfolio,must,yes,yes,"S18 matriz de calor con umbral 0.75; motor Rust real (corr_matrix, pearson)"
 Ajuste de nueva estrategia a cartera existente (no correlacionada),portfolio,could,yes,no,no hay busqueda de estrategias no correlacionadas para añadir
 Export codigo fuente a MetaTrader 4,export,must,yes,yes,"EA MQL4 real generado por export.rs: inputs con default, OnTick, logica de indicador y gestion de posicion"

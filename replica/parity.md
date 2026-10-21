@@ -10,8 +10,8 @@ Fecha: 20-10-2026 · Herramientas: `.claude/skills/replica-diff/parity.py` y
 
 | Métrica | Valor | Cómo se ha medido |
 | --- | --- | --- |
-| **Paridad de funcionalidades (todas)** | **60,5 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
-| **Paridad dentro del alcance que definiste** | **63,3 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
+| **Paridad de funcionalidades (todas)** | **61,4 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
+| **Paridad dentro del alcance que definiste** | **64,2 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
 | Must-haves completos | **10 de 20** | |
 | Layout (pantalla Retesteo) | **17,8 / 100** | `imgdiff.py` en modo layout contra un recorte de la captura pública del original |
 
@@ -316,6 +316,32 @@ roto?*
 - **Tests**: 5 de Rust (registro y relectura, orden y filtros, comparación,
   borrado y delta entre dos corridas) + 3 e2e. El fake también registra, para
   que el flujo se pueda probar en el navegador.
+
+
+### 9) Ponderación de cartera con modelos reales — **hecho**
+
+La cartera era equiponderada: si dos estrategias arriesgan de forma muy distinta,
+repartirlas a partes iguales es tomar una decisión que nadie ha tomado. Ahora
+hay cuatro modelos, todos con motor propio:
+
+- **Equiponderado**: 1/N, como antes.
+- **Inverso a volatilidad**: pesa más la estrategia que se mueve menos.
+- **Paridad de riesgo**: cada miembro aporta **el mismo riesgo**, resuelto con el
+  punto fijo clásico sobre las contribuciones de riesgo (no es "inverso a
+  volatilidad": tiene en cuenta la correlación entre ellas).
+- **Personalizado**: los pesos que ponga el usuario.
+
+La pantalla de cartera muestra por miembro la **volatilidad**, el **peso** y la
+**contribución al riesgo** (que no es lo mismo que el peso: una estrategia con
+mucho peso y mucha correlación puede aportar casi todo el riesgo de la cartera),
+más el resumen de cartera: volatilidad, Max DD y beneficio de la equity
+**ponderada**. Y cada corrida se guarda (`portfolio_runs`), con su historial.
+
+**De paso, el test destapó dos fallos de accesibilidad que llevaban tiempo
+ahí**: las celdas del mapa de correlación usaban texto apagado sobre tinte
+ámbar (4,03:1, por debajo del 4,5:1 de AA) y una cabecera de tabla vacía. Y al
+mirarlas de cerca, esas celdas seguían usando **los azules anteriores al
+rebranding**: ahora usan la paleta violeta/ámbar/rojo de SophieQuant.
 
 ---
 

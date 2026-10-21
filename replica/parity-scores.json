@@ -1,6 +1,6 @@
 {
   "all": {
-    "feature_score": 60.5,
+    "feature_score": 61.4,
     "counted": 51,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -57,7 +57,7 @@
       },
       {
         "area": "portfolio",
-        "score": 70.0,
+        "score": 80.0,
         "features": 5
       },
       {
@@ -259,13 +259,6 @@
         "notes": "checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
       },
       {
-        "feature": "Portfolio Composer con modelos de ponderacion",
-        "area": "portfolio",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "solo equiponderado; sin modelos de ponderacion ni ajuste de una estrategia nueva a la cartera"
-      },
-      {
         "feature": "Logica difusa (fuzzy) en estrategias generadas",
         "area": "builder",
         "priority": "could",
@@ -373,12 +366,19 @@
         "priority": "could",
         "clone": "yes",
         "notes": "PROPIO: el generador ordena por un score explicable (35 % walk-forward, 30 % supervivencia MC, 20 % SPP, 15 % perfil) en vez de por beneficio; el build avisa de que filtro esta bloqueando"
+      },
+      {
+        "feature": "Historial de analisis con comparacion entre corridas (antes/despues de cambiar una regla)",
+        "area": "history",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: cada retesteo, refinamiento, optimizacion, matriz WF, Monte Carlo, SPP o perfil queda registrado con veredicto y metricas (tabla analysis_runs); el historial compara cada corrida con la anterior del mismo tipo"
       }
     ],
     "problems": []
   },
   "inscope": {
-    "feature_score": 63.3,
+    "feature_score": 64.2,
     "counted": 48,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -430,7 +430,7 @@
       },
       {
         "area": "portfolio",
-        "score": 70.0,
+        "score": 80.0,
         "features": 5
       },
       {
@@ -618,13 +618,6 @@
         "notes": "checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
       },
       {
-        "feature": "Portfolio Composer con modelos de ponderacion",
-        "area": "portfolio",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "solo equiponderado; sin modelos de ponderacion ni ajuste de una estrategia nueva a la cartera"
-      },
-      {
         "feature": "Logica difusa (fuzzy) en estrategias generadas",
         "area": "builder",
         "priority": "could",
@@ -725,6 +718,13 @@
         "priority": "could",
         "clone": "yes",
         "notes": "PROPIO: el generador ordena por un score explicable (35 % walk-forward, 30 % supervivencia MC, 20 % SPP, 15 % perfil) en vez de por beneficio; el build avisa de que filtro esta bloqueando"
+      },
+      {
+        "feature": "Historial de analisis con comparacion entre corridas (antes/despues de cambiar una regla)",
+        "area": "history",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: cada retesteo, refinamiento, optimizacion, matriz WF, Monte Carlo, SPP o perfil queda registrado con veredicto y metricas (tabla analysis_runs); el historial compara cada corrida con la anterior del mismo tipo"
       }
     ],
     "problems": []
