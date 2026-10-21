@@ -520,8 +520,46 @@ export function S05Strategy() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [s, setS] = useState<StrategyRec | null>(null)
+  const [script, setScript] = useState<string | null>(null)
+  const [analisis, setAnalisis] = useState<{ veredicto: string; etiqueta: string; metricas: Record<string, number>; notas: string } | null>(null)
+  const [historial, setHistorial] = useState<Array<{ id: number; script: string; verdict: string; label: string; createdAt: number }>>([])
+  const [caMsg, setCaMsg] = useState<string | null>(null)
+  const [caBusy, setCaBusy] = useState(false)
   useEffect(() => { api.getStrategy(+id!).then(setS) }, [id])
+  useEffect(() => {
+    api.listCustomAnalyses(+id!).then(setHistorial).catch(() => setHistorial([]))
+  }, [id])
   const m = s?.lastRun?.metrics
+
+  async function elegirScript() {
+    const ruta = await api.pickFile(['py'])
+    if (ruta) { setScript(ruta); setCaMsg(null) }
+  }
+
+  async function ejecutarScript() {
+    if (!script || !s) return
+    setCaBusy(true); setCaMsg(null)
+    try {
+      const r = await api.runCustomAnalysis(s.id, script)
+      setAnalisis(r.resultado)
+      setHistorial(await api.listCustomAnalyses(s.id))
+    } catch (e) {
+      setCaMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCaBusy(false)
+    }
+  }
+
+  async function exportarCsv() {
+    if (!s) return
+    setCaMsg(null)
+    try {
+      const ruta = await api.exportStrategyCsv(s.id)
+      setCaMsg(`Barras exportadas a ${ruta}`)
+    } catch (e) {
+      setCaMsg(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   return (
     <Page title={s ? s.name : '…'} icon={<LibraryBig size={16} />}
@@ -558,6 +596,58 @@ export function S05Strategy() {
           <VerdictCard strategyIds={[s.id]} title="Veredictos de robustez de esta estrategia" />
 
           <HistoryPanel strategyId={s.id} title="Historial de analisis de esta estrategia" />
+
+          <section className="rounded-md border border-border bg-surface p-3">
+            <h2 className="mb-2 text-sm font-semibold text-muted">Analisis personalizado (Python)</h2>
+            <p className="mb-2 text-xs text-muted">
+              Elige un script y el motor le pasa la estrategia y sus barras. El script recibe
+              <span className="font-mono"> --input &lt;json&gt; </span> y escribe
+              <span className="font-mono"> --output &lt;json&gt; </span>. Contrato en
+              <span className="font-mono"> replica/custom-analysis.md</span>.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={() => void elegirScript()}>
+                {script ? 'Cambiar script' : 'Elegir script'}
+              </Button>
+              {script && <span className="font-mono text-xs text-muted">{script.split(/[\\/]/).pop()}</span>}
+              <Button variant="primary" size="sm" loading={caBusy} disabled={!script}
+                onClick={() => void ejecutarScript()}>
+                Ejecutar
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => void exportarCsv()}>
+                Exportar barras a CSV
+              </Button>
+            </div>
+
+            {caMsg && <p className="mt-2 text-xs text-muted" role="status">{caMsg}</p>}
+
+            {analisis && (
+              <div className="mt-3 rounded-md border border-border bg-surface-raised p-2">
+                <p className="text-sm">
+                  <Badge tone={analisis.veredicto === 'pass' ? 'pass' : analisis.veredicto === 'fail' ? 'fail' : 'running'}
+                    label={analisis.etiqueta || analisis.veredicto.toUpperCase()} />
+                </p>
+                {Object.keys(analisis.metricas).length > 0 && (
+                  <p className="mt-1 font-mono text-xs text-muted">
+                    {Object.entries(analisis.metricas).map(([k, v]) => (
+                      <span key={k} className="mr-2">{k} {fmtNum(v, 3)}</span>
+                    ))}
+                  </p>
+                )}
+                {analisis.notas && <p className="mt-1 text-xs text-muted">{analisis.notas}</p>}
+              </div>
+            )}
+
+            {historial.length > 0 && (
+              <ul className="mt-3 space-y-1">
+                {historial.map(h => (
+                  <li key={h.id} className="text-xs text-muted">
+                    {new Date(h.createdAt * 1000).toLocaleString('es-ES')} · {h.script.split(/[\\/]/).pop()} · {h.label || h.verdict}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
       )}
     </Page>

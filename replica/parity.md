@@ -10,8 +10,8 @@ Fecha: 20-10-2026 · Herramientas: `.claude/skills/replica-diff/parity.py` y
 
 | Métrica | Valor | Cómo se ha medido |
 | --- | --- | --- |
-| **Paridad de funcionalidades (todas)** | **61,4 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
-| **Paridad dentro del alcance que definiste** | **64,2 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
+| **Paridad de funcionalidades (todas)** | **64,0 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
+| **Paridad dentro del alcance que definiste** | **67,0 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
 | Must-haves completos | **10 de 20** | |
 | Layout (pantalla Retesteo) | **17,8 / 100** | `imgdiff.py` en modo layout contra un recorte de la captura pública del original |
 
@@ -366,6 +366,28 @@ difieren.
 Esto no cierra la paridad de motor tick —que es otro bloque, carísimo— pero
 elimina la sorpresa: el usuario sabe **por qué** los números pueden diferir y
 tiene una lista para comprobarlo.
+
+
+### 11) Resample, OOS multiple y enlace con Python — **hecho**
+
+Las tres mejoras que se propusieron como bloque:
+
+- **Resample de datasets**: con un solo historico m1 salen m5, m15, m30, h1, h4,
+  d1, w1 y mn1. Los cubos van alineados al epoch, asi que una hora son 60
+  barras m1 exactas. Bajar de temporalidad se rechaza (se perderia informacion).
+  Cada dataset nuevo se registra y ya vale para generar y para retestear.
+- **Multiples periodos out-of-sample**: el 30 % OOS se puede partir en 1, 3 o 5
+  ventanas consecutivas, cada una evaluada por separado. Aparece la
+  **consistencia** («rentable en 2 de 3 periodos OOS») y el peor PF. Es la
+  version barata del triple split que pedia la investigacion: en vez de un unico
+  tramo out-of-sample que puede dar la cara buena por casualidad, varias
+  ventanas que no se enganan entre si.
+- **Custom Analysis (Python)**: contrato versionado; la app escribe la
+  estrategia y un CSV con las barras, ejecuta el script del usuario **sin shell**
+  y con **limite de 60 s**, valida la salida (solo `veredicto`, `etiqueta`,
+  `metricas` numericas y `notas`) y la guarda con su historial. Hay un script de
+  ejemplo funcionando (`ejemplos/ejemplo_sharpe.py`) y el contrato documentado en
+  `replica/custom-analysis.md`.
 
 ---
 

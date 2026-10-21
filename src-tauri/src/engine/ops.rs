@@ -586,28 +586,85 @@ pub fn oos_frac_of(bars: &[Bar], trades: &[Trade]) -> f64 {
     (before as f64 / total).clamp(0.0, 1.0)
 }
 
-// ── retest OOS ──────────────────────────────────────────────────────
 
-/// Retest de una estrategia sobre el 30% final del dataset (out-of-sample).
-/// `original` son las métricas almacenadas de la última corrida completa.
-pub fn retest_one(core: &StrategyCore, original: Option<&Metrics>, cfg: &EngineCfg) -> Result<Value, String> {
-    if !core.has_bars() {
-        return Err("sin dataset QFN cargable".into());
-    }
-    let cut = (core.bars.len() * 7 / 10).max(100);
-    if core.bars.len().saturating_sub(cut) < 60 {
+/// Retesteo en varios periodos out-of-sample.
+///
+/// El dataset se parte en 70 % in-sample + 30 % out-of-sample (igual que el
+/// retesteo de una sola ventana) y ese 30 % se divide a su vez en `k` ventanas
+/// consecutivas, cada una evaluada por separado. Asi se ve si la estrategia
+/// aguanta de forma *consistente* o solo por suerte en un tramo.
+///
+/// `k = 1` reproduce exactamente el retesteo de siempre.
+pub fn retest_periods(
+    bars: &[Bar],
+    tmpl: Template,
+    params: [f64; 3],
+    cfg: &EngineCfg,
+    k: usize,
+) -> Result<Value, String> {
+    let cut = (bars.len() * 7 / 10).max(100);
+    let oos = &bars[cut..];
+    if oos.len() < 60 {
         return Err("dataset demasiado corto para separar OOS".into());
     }
-    let retest = backtest::run(&core.bars[cut..], core.template, core.params, cfg);
-    let m = &retest.metrics;
-    let verdict = if m.profit_factor >= 1.15 && m.net_profit > 0.0 { "pass" }
-        else if m.profit_factor >= 0.95 { "warn" } else { "fail" };
+    let k = k.clamp(1, 12);
+    let ventana = oos.len() / k;
+    if ventana < 20 {
+        return Err(format!(
+            "el dataset no da para {k} periodos OOS (cada uno necesita 20 barras)"
+        ));
+    }
+    let mut periodos: Vec<Value> = Vec::new();
+    let mut pass = 0usize;
+    let mut peor_pf = f64::MAX;
+    for i in 0..k {
+        let ini = i * ventana;
+        let fin = if i == k - 1 { oos.len() } else { ini + ventana };
+        let trozo = &oos[ini..fin];
+        let out = backtest::run(trozo, tmpl, params, cfg);
+        let m = &out.metrics;
+        let (verdict, nota) = if m.n_trades == 0 {
+            ("fail", "la regla no se activa en este periodo".to_string())
+        } else if m.profit_factor >= 1.15 && m.net_profit > 0.0 {
+            ("pass", String::new())
+        } else if m.profit_factor >= 0.95 {
+            ("warn", "apenas positivo".to_string())
+        } else {
+            ("fail", "pierde dinero aqui".to_string())
+        };
+        if verdict == "pass" { pass += 1; }
+        peor_pf = peor_pf.min(m.profit_factor);
+        periodos.push(json!({
+            "indice": i + 1,
+            "desde": trozo.first().map(|b| b.time).unwrap_or(0),
+            "hasta": trozo.last().map(|b| b.time).unwrap_or(0),
+            "barras": trozo.len(),
+            "verdict": verdict,
+            "nota": nota,
+            "metrics": metrics_json(m),
+        }));
+    }
+    let (verdict, detalle) = if pass == k {
+        ("pass", format!("rentable en los {k} periodos OOS"))
+    } else if pass > 0 {
+        ("warn", format!("rentable solo en {pass} de {k} periodos OOS"))
+    } else {
+        ("fail", format!("no rentable en ninguno de los {k} periodos OOS"))
+    };
     Ok(json!({
-        "original": original.map(metrics_json),
-        "retest": metrics_json(m),
-        "verdict": verdict,
+        "periodos": periodos,
+        "consistencia": {
+            "verdict": verdict,
+            "detalle": detalle,
+            "pasados": pass,
+            "total": k,
+            "peorPF": if peor_pf.is_finite() { (peor_pf * 100.0).round() / 100.0 } else { 0.0 },
+        },
     }))
 }
+
+// ── retest OOS ──────────────────────────────────────────────────────
+
 
 pub fn metrics_json(m: &Metrics) -> Value {
     json!({
@@ -919,6 +976,37 @@ fn round3(v: f64) -> f64 { (v * 1000.0).round() / 1000.0 }
 mod tests {
     use super::*;
 
+
+
+    /// El retesteo multi-periodo divide el OOS en ventanas y mide consistencia.
+    #[test]
+    fn el_retesteo_multi_periodo_mide_la_consistencia() {
+        let cfg = EngineCfg::default();
+        let barras = serie_con_ciclos(1200);
+        let r = retest_periods(&barras, Template::MaCross, [20.0, 50.0, 0.0], &cfg, 3)
+            .expect("el retesteo multi-periodo debe funcionar");
+        let periodos = r["periodos"].as_array().unwrap();
+        assert_eq!(periodos.len(), 3);
+        for (i, p) in periodos.iter().enumerate() {
+            assert_eq!(p["indice"], (i + 1) as i64);
+            assert!(p["verdict"].is_string());
+            assert!(p["metrics"]["profitFactor"].is_number());
+        }
+        let c = &r["consistencia"];
+        assert_eq!(c["total"], 3);
+        assert!(c["pasados"].as_u64().unwrap() <= 3);
+        assert!(c["detalle"].as_str().unwrap().contains("periodos OOS"));
+    }
+
+    /// Con una sola ventana se reproduce el retesteo clasico.
+    #[test]
+    fn una_sola_ventana_da_un_unico_periodo() {
+        let cfg = EngineCfg::default();
+        let barras = serie_con_ciclos(1200);
+        let r = retest_periods(&barras, Template::MaCross, [20.0, 50.0, 0.0], &cfg, 1).unwrap();
+        assert_eq!(r["periodos"].as_array().unwrap().len(), 1);
+        assert_eq!(r["consistencia"]["total"], 1);
+    }
 
     /// Serie con ciclos claros: hace que el cruce de medias genere operaciones.
     fn serie_con_ciclos(n: usize) -> Vec<Bar> {

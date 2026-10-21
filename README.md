@@ -16,7 +16,7 @@ mágico.
 | --- | --- |
 | **Constructor** | Genera estrategias con un algoritmo genético determinista, filtrando por **cualquier métrica** del motor y ordenando por **score de robustez**, no por beneficio. |
 | **Banco de estrategias** | Todas las estrategias que pasan los filtros, con sus métricas y su score de robustez. |
-| **Retesteo** | Comprueba una estrategia en otro símbolo o temporalidad: la primera prueba de si sobrevive fuera de donde nació. |
+| **Retesteo** | Comprueba una estrategia en otro símbolo o temporalidad, y en 1, 3 o 5 ventanas out-of-sample: la primera prueba de si sobrevive fuera de donde nació. |
 | **Refinador** | Genera variantes de la regla (stop, objetivo, parámetros) y conserva la mejor. |
 | **Optimizador** | Búsqueda en rejilla simple y walk-forward, con descuento out-of-sample. |
 | **Matriz walk-forward** | Mapa de calor de eficiencia out-of-sample por combinación de parámetros. |
@@ -26,6 +26,7 @@ mágico.
 | **Cartera** | Agrupa estrategias, mide correlación y simula la cartera. |
 | **Laboratorio** | Métricas avanzadas, Monte Carlo de cartera y simulación de gestión de capital. |
 | **Editor sin código** | Edita la regla (3 plantillas que el motor ejecuta de verdad) y **recalcula la corrida**. |
+| **Análisis personalizado** | Ejecuta **tu** script de Python sobre la estrategia y sus barras, con un contrato versionado y salida validada. |
 | **Exportar código** | Genera un EA real para MetaTrader 4 y MetaTrader 5. |
 
 ### Las tres ideas que la differentiating
@@ -48,7 +49,7 @@ referencia:
 
 | Métrica | Valor |
 | --- | --- |
-| Paridad de funcionalidades | **59,2 / 100** (61,9 dentro del alcance definido) |
+| Paridad de funcionalidades | **64,0 / 100** (67,0 dentro del alcance definido) |
 | Must-haves completos | **10 de 20** |
 | Tests Rust | **40 / 40** |
 | Tests end-to-end + accesibilidad (axe) | **88 / 88** |
@@ -207,4 +208,6 @@ de rentabilidades).
 | `replica/entrepreneur/` | Investigación de usuarios: qué·echan de menos y por qué |
 | `replica/features.csv` | Matriz de 59 funcionalidades con su estado real |
 | `replica/parity.md` | Informe de paridad, layout y plan de evolución |
+| `replica/export-verificacion.md` | Qué asume el export y cómo comprobar el EA en MetaTrader |
+| `replica/custom-analysis.md` | Contrato de los scripts de Python (Custom Analysis) |
 | `replica/build-log.md` | Registro de todo el trabajo, fase a fase |

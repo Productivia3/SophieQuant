@@ -748,3 +748,32 @@ Cierra el P1 que propose la propia investigacion ("Aviso de verificacion de expo
 - **Tests**: 2 de Rust (fichero limpio y fichero con hueco/precio imposible/
   volumen cero) + 2 e2e (el panel de verificacion y que el EA se siga pudiendo
   guardar). Total: 55 Rust, 98 e2e.
+
+---
+
+## Bloque de mejoras 1: resample, OOS multiple y Python - 21-10-2026
+
+Las tres mejoras propuestas como prioritarias, en un solo bloque.
+
+- **Resample** (`engine/datastore.rs`): `tf_minutes`, `tf_targets` y `resample`.
+  Cubos alineados al epoch; OHLC correcto (open primera, high maximo, low minimo,
+  close ultima, volume suma); subir de temporalidad, nunca bajar. Commands
+  `resample_dataset` y `list_resample_targets`; en el Gestor de datos cada dataset
+  tiene un selector de temporalidad destino y un boton «Resamplear».
+- **OOS multiple** (`engine/ops.rs::retest_periods`): el 30 % out-of-sample se
+  parte en 1/3/5 ventanas consecutivas, cada una evaluada por separado, con
+  veredicto de consistencia y peor PF. Sustituye a `retest_one`, que queda
+  eliminado (0 codigo muerto). El command `run_retest` acepta `periodos`; la
+  pantalla de Retesteo tiene el selector y una columna «Consistencia OOS» con las
+  letras P/A/F de cada ventana.
+- **Custom Analysis** (`engine/analysis.rs`): contrato versionado, ejecucion sin
+  shell con limite de 60 s, salida validada campo a campo y persistida en
+  `custom_analyses`. Commands `run_custom_analysis`, `list_custom_analyses` y
+  `export_strategy_csv`. UI en el detalle de la estrategia, con selector de
+  script, ejecucion, resultado e historial. Contrato en `replica/custom-analysis.md`
+  y script de ejemplo en `ejemplos/ejemplo_sharpe.py` (probado de punta a punta:
+  genera un JSON valido que la app normaliza).
+- **Tests**: 63 Rust (7 nuevos) y 100 e2e (2 nuevos). 0 avisos de compilacion.
+- **Numeros**: paridad de 61,4 a **64,0** (total) y de 64,2 a **67,0** (alcance).
+  Las filas «Gestion de datasets» y «Multiples periodos OOS» pasan a completas, y
+  el enlace con Python se registra como funcion propia.

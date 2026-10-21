@@ -1,6 +1,6 @@
 {
   "all": {
-    "feature_score": 61.4,
+    "feature_score": 64.0,
     "counted": 51,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -21,14 +21,14 @@
         "features": 2
       },
       {
-        "area": "data",
-        "score": 40.9,
-        "features": 5
-      },
-      {
         "area": "export",
         "score": 42.9,
         "features": 6
+      },
+      {
+        "area": "data",
+        "score": 50.0,
+        "features": 5
       },
       {
         "area": "builder",
@@ -61,11 +61,6 @@
         "features": 5
       },
       {
-        "area": "robustness",
-        "score": 83.3,
-        "features": 5
-      },
-      {
         "area": "analyzer",
         "score": 87.5,
         "features": 3
@@ -89,6 +84,11 @@
         "area": "improver",
         "score": 100.0,
         "features": 1
+      },
+      {
+        "area": "robustness",
+        "score": 100.0,
+        "features": 5
       },
       {
         "area": "editor",
@@ -144,7 +144,7 @@
         "area": "data",
         "priority": "must",
         "clone": "partial",
-        "notes": "import CSV real (engine::datastore::import_csv) con selector nativo y export CSV/QFD real; sin tick ni EOD nativos"
+        "notes": "import CSV real (engine::datastore::import_csv) con selector nativo, export CSV/QFD real y DIAGNOSTICO de calidad (huecos, volumen cero, precios incoherentes, timestamps repetidos); sin tick ni EOD nativos"
       },
       {
         "feature": "Bank of Strategies con persistencia de millones de backtests",
@@ -231,13 +231,6 @@
         "notes": "no implementado y NO se anuncia en la UI"
       },
       {
-        "feature": "Multiples periodos OOS con filtrado por periodo",
-        "area": "robustness",
-        "priority": "should",
-        "clone": "no",
-        "notes": "el WF actual es una sola pasada; no hay seleccion por periodo OOS"
-      },
-      {
         "feature": "Graficos equity / MAE-MFE / capital diario",
         "area": "backtester",
         "priority": "should",
@@ -250,13 +243,6 @@
         "priority": "should",
         "clone": "partial",
         "notes": "S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
-      },
-      {
-        "feature": "Gestion de datasets: resample / checks de calidad / conversion",
-        "area": "data",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
       },
       {
         "feature": "Logica difusa (fuzzy) en estrategias generadas",
@@ -373,12 +359,33 @@
         "priority": "could",
         "clone": "yes",
         "notes": "PROPIO: cada retesteo, refinamiento, optimizacion, matriz WF, Monte Carlo, SPP o perfil queda registrado con veredicto y metricas (tabla analysis_runs); el historial compara cada corrida con la anterior del mismo tipo"
+      },
+      {
+        "feature": "Verificacion del export: que ha asumido el backtest y checklist para MetaTrader",
+        "area": "export",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: al generar el EA se muestran los supuestos reales (barras y no ticks, spread/comision del modelo, posicion fija, solo largo, sin horarios) y una checklist de 8 puntos para comprobar en MT5; documento en replica/export-verificacion.md"
+      },
+      {
+        "feature": "Diagnostico de calidad del dataset importado",
+        "area": "data",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: el importador comprueba el fichero (huecos, volumen cero, precios incoherentes, timestamps repetidos) y lo dice: es lo que explica que el backtest sea mas optimista que el broker"
+      },
+      {
+        "feature": "Custom Analysis: enlace con scripts de Python (contrato versionado)",
+        "area": "workflows",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: la app escribe el contrato (estrategia + CSV de barras), ejecuta el script del usuario SIN shell y con limite de 60 s, valida la salida (solo veredicto/etiqueta/metricas/notas) y la guarda; hay un script de ejemplo"
       }
     ],
     "problems": []
   },
   "inscope": {
-    "feature_score": 64.2,
+    "feature_score": 67.0,
     "counted": 48,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -419,23 +426,18 @@
         "features": 1
       },
       {
-        "area": "data",
-        "score": 64.3,
-        "features": 3
-      },
-      {
         "area": "backtester",
         "score": 69.2,
         "features": 5
       },
       {
-        "area": "portfolio",
-        "score": 80.0,
-        "features": 5
+        "area": "data",
+        "score": 78.6,
+        "features": 3
       },
       {
-        "area": "robustness",
-        "score": 83.3,
+        "area": "portfolio",
+        "score": 80.0,
         "features": 5
       },
       {
@@ -462,6 +464,11 @@
         "area": "improver",
         "score": 100.0,
         "features": 1
+      },
+      {
+        "area": "robustness",
+        "score": 100.0,
+        "features": 5
       },
       {
         "area": "editor",
@@ -517,7 +524,7 @@
         "area": "data",
         "priority": "must",
         "clone": "partial",
-        "notes": "import CSV real (engine::datastore::import_csv) con selector nativo y export CSV/QFD real; sin tick ni EOD nativos"
+        "notes": "import CSV real (engine::datastore::import_csv) con selector nativo, export CSV/QFD real y DIAGNOSTICO de calidad (huecos, volumen cero, precios incoherentes, timestamps repetidos); sin tick ni EOD nativos"
       },
       {
         "feature": "Bank of Strategies con persistencia de millones de backtests",
@@ -590,13 +597,6 @@
         "notes": "no implementado y NO se anuncia en la UI"
       },
       {
-        "feature": "Multiples periodos OOS con filtrado por periodo",
-        "area": "robustness",
-        "priority": "should",
-        "clone": "no",
-        "notes": "el WF actual es una sola pasada; no hay seleccion por periodo OOS"
-      },
-      {
         "feature": "Graficos equity / MAE-MFE / capital diario",
         "area": "backtester",
         "priority": "should",
@@ -609,13 +609,6 @@
         "priority": "should",
         "clone": "partial",
         "notes": "S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
-      },
-      {
-        "feature": "Gestion de datasets: resample / checks de calidad / conversion",
-        "area": "data",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
       },
       {
         "feature": "Logica difusa (fuzzy) en estrategias generadas",
@@ -725,6 +718,27 @@
         "priority": "could",
         "clone": "yes",
         "notes": "PROPIO: cada retesteo, refinamiento, optimizacion, matriz WF, Monte Carlo, SPP o perfil queda registrado con veredicto y metricas (tabla analysis_runs); el historial compara cada corrida con la anterior del mismo tipo"
+      },
+      {
+        "feature": "Verificacion del export: que ha asumido el backtest y checklist para MetaTrader",
+        "area": "export",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: al generar el EA se muestran los supuestos reales (barras y no ticks, spread/comision del modelo, posicion fija, solo largo, sin horarios) y una checklist de 8 puntos para comprobar en MT5; documento en replica/export-verificacion.md"
+      },
+      {
+        "feature": "Diagnostico de calidad del dataset importado",
+        "area": "data",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: el importador comprueba el fichero (huecos, volumen cero, precios incoherentes, timestamps repetidos) y lo dice: es lo que explica que el backtest sea mas optimista que el broker"
+      },
+      {
+        "feature": "Custom Analysis: enlace con scripts de Python (contrato versionado)",
+        "area": "workflows",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: la app escribe el contrato (estrategia + CSV de barras), ejecuta el script del usuario SIN shell y con limite de 60 s, valida la salida (solo veredicto/etiqueta/metricas/notas) y la guarda; hay un script de ejemplo"
       }
     ],
     "problems": []

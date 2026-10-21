@@ -25,7 +25,89 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     let _ = conn.execute("alter table backtest_runs add column oos_frac real", []);
     let _ = conn.execute("alter table strategies add column robust_score real", []);
     let _ = conn.execute("alter table strategies add column robust_detail jsonb", []);
+    // tabla de analisis personalizados (Custom Analysis)
+    let _ = conn.execute_batch(crate::engine::analysis::SCHEMA);
     Ok(())
+}
+
+
+/// ── Resample de datasets ────────────────────────────────────────────
+
+/// Minutos por temporalidad (None para tick, que no se resamplea).
+pub fn tf_minutes(tf: &str) -> Option<i64> {
+    Some(match tf {
+        "m1" => 1,
+        "m5" => 5,
+        "m15" => 15,
+        "m30" => 30,
+        "h1" => 60,
+        "h4" => 240,
+        "d1" => 1440,
+        "w1" => 10080,
+        "mn1" => 43200,
+        _ => return None,
+    })
+}
+
+/// Temporalidades a las que se puede subir desde `from_tf`.
+pub fn tf_targets(from_tf: &str) -> Vec<&'static str> {
+    let todos = ["m1", "m5", "m15", "m30", "h1", "h4", "d1", "w1", "mn1"];
+    let f = match tf_minutes(from_tf) { Some(m) => m, None => return vec![] };
+    todos
+        .iter()
+        .copied()
+        .filter(|t| tf_minutes(t).unwrap_or(0) > f)
+        .collect()
+}
+
+/// Agrega barras a una temporalidad mayor.
+///
+/// Los cubos van alineados al epoch (UTC), asi que una hora son 60 barras m1
+/// exactas. `open` es la primera, `high` el maximo, `low` el minimo, `close` la
+/// ultima y `volume` la suma.
+pub fn resample(bars: &[Bar], from_tf: &str, to_tf: &str) -> Result<Vec<Bar>, String> {
+    let f = tf_minutes(from_tf).ok_or(format!("'{from_tf}' no se puede resamplear"))?;
+    let t = tf_minutes(to_tf).ok_or(format!("'{to_tf}' no se puede resamplear"))?;
+    if t < f {
+        return Err("no se puede bajar de temporalidad: se perderia informacion".into());
+    }
+    if t == f {
+        return Ok(bars.to_vec());
+    }
+    if bars.is_empty() {
+        return Ok(vec![]);
+    }
+    let secs = t * 60;
+    let mut out: Vec<Bar> = Vec::with_capacity(bars.len() / (t / f) as usize + 1);
+    let mut cur: Option<Bar> = None;
+    for b in bars {
+        let bucket = (b.time / secs) * secs;
+        match cur.as_mut() {
+            Some(c) if c.time == bucket => {
+                c.high = c.high.max(b.high);
+                c.low = c.low.min(b.low);
+                c.close = b.close;
+                c.volume += b.volume;
+            }
+            _ => {
+                if let Some(c) = cur.take() {
+                    out.push(c);
+                }
+                cur = Some(Bar {
+                    time: bucket,
+                    open: b.open,
+                    high: b.high,
+                    low: b.low,
+                    close: b.close,
+                    volume: b.volume,
+                });
+            }
+        }
+    }
+    if let Some(c) = cur {
+        out.push(c);
+    }
+    Ok(out)
 }
 
 /// Formato binario propio (.qfn): header "QFN1" + u32 count + [i64 time + 5×f64 OHLCV]
@@ -289,6 +371,58 @@ mod tests {
         let p = std::env::temp_dir().join(format!("qf_test_{}_{name}", std::process::id()));
         let _ = std::fs::remove_file(&p);
         p
+    }
+
+
+    /// El resample agrega bien: OHLC correcto, volumen sumado y cubos alineados.
+    #[test]
+    fn el_resample_agrega_correctamente() {
+        // 12 barras de 1 minuto, con inicio alineado al epoch (multiplo de 5 min)
+        let base = 1_700_000_100i64;
+        let bars: Vec<Bar> = (0..12)
+            .map(|i| Bar {
+                time: base + i * 60,
+                open: 1.0 + i as f64 * 0.01,
+                high: 1.5 + i as f64 * 0.01,
+                low: 0.5 + i as f64 * 0.01,
+                close: 1.2 + i as f64 * 0.01,
+                volume: 10.0,
+            })
+            .collect();
+        let m5 = resample(&bars, "m1", "m5").unwrap();
+        // 12 barras de 1 min -> 3 cubos de 5 min (5 + 5 + 2)
+        assert_eq!(m5.len(), 3, "cubos: {}", m5.len());
+        // el primer cubo: open de la primera, close de la ultima, volumen sumado
+        assert_eq!(m5[0].open, bars[0].open);
+        assert_eq!(m5[0].close, bars[4].close);
+        assert_eq!(m5[0].high, bars.iter().take(5).map(|b| b.high).fold(f64::MIN, f64::max));
+        assert_eq!(m5[0].low, bars.iter().take(5).map(|b| b.low).fold(f64::MAX, f64::min));
+        assert_eq!(m5[0].volume, 50.0);
+        // los cubos estan alineados al epoch
+        assert_eq!(m5[0].time % (5 * 60), 0);
+    }
+
+    /// Bajar de temporalidad se rechaza: se perderia informacion.
+    #[test]
+    fn no_se_puede_bajar_de_temporalidad() {
+        let bars: Vec<Bar> = (0..5)
+            .map(|i| Bar {
+                time: 1_700_000_000 + i * 3600,
+                open: 1.0, high: 1.1, low: 0.9, close: 1.0, volume: 1.0,
+            })
+            .collect();
+        assert!(resample(&bars, "h1", "m1").is_err());
+        // y a la misma temporalidad devuelve lo mismo
+        let igual = resample(&bars, "h1", "h1").unwrap();
+        assert_eq!(igual.len(), bars.len());
+    }
+
+    /// La lista de destinos posibles respeta el origen.
+    #[test]
+    fn los_destinos_de_resample_son_mayores_que_el_origen() {
+        assert_eq!(tf_targets("m1"), vec!["m5", "m15", "m30", "h1", "h4", "d1", "w1", "mn1"]);
+        assert_eq!(tf_targets("h1"), vec!["h4", "d1", "w1", "mn1"]);
+        assert!(tf_targets("tick").is_empty());
     }
 
     /// CSV con: ruido (filas basura), fila con OHLC inválido, gaps de tiempo,

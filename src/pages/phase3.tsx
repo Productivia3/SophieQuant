@@ -174,6 +174,19 @@ export function S08Retester() {
                         </td>
                       ))}
                       <td className="px-3 py-2">
+                        {r.consistencia ? (
+                          <>
+                            <Badge tone={verdictTone(r.consistencia.verdict === 'pending' ? 'fail' : r.consistencia.verdict)}
+                              label={r.consistencia.detalle} />
+                            {r.periodos && r.periodos.length > 1 && (
+                              <span className="ml-2 font-mono text-xs text-muted" title="Veredicto de cada periodo OOS">
+                                {r.periodos.map(p => (p.verdict === 'pass' ? 'P' : p.verdict === 'warn' ? 'A' : 'F')).join(' ')}
+                              </span>
+                            )}
+                          </>
+                        ) : <span className="text-muted">—</span>}
+                      </td>
+                      <td className="px-3 py-2">
                         <Badge tone={verdictTone(r.resumen.verdict === 'pending' ? 'fail' : r.resumen.verdict)}
                           label={r.resumen.detalle} />
                       </td>

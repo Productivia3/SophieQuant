@@ -296,10 +296,20 @@ export function S21DataManager() {
   const [importSymbol, setImportSymbol] = useState<number>(1)
   const [importTf, setImportTf] = useState<string>('m1')
   const [calidad, setCalidad] = useState<ImportQuality | null>(null)
+  const [destinos, setDestinos] = useState<Record<number, string[]>>({})
+  const [tfResample, setTfResample] = useState<Record<number, string>>({})
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api.listDataFiles().then(setFiles)
+    api.listDataFiles().then(async fs => {
+      setFiles(fs)
+      // que temporalidades admite cada dataset
+      const pares = await Promise.all(
+        fs.map(async f => [f.id, await api.listResampleTargets(f.timeframe)] as const))
+      const mapa: Record<number, string[]> = {}
+      for (const [id, ts] of pares) mapa[id] = ts
+      setDestinos(mapa)
+    })
     api.listSymbols().then(ss => {
       const map: Record<number, string> = {}
       ss.forEach(s => { map[s.id] = s.name })
@@ -340,6 +350,21 @@ export function S21DataManager() {
     setNotice(`Importado ${f.name}: ${fmtNum(df.nBars, 0)} barras listas.`)
     setBusy(false)
     e.target.value = ''   // permite reimportar el mismo fichero
+  }
+
+  async function onResample(id: number) {
+    const tf = tfResample[id]
+    if (!tf) return
+    setBusy(true); setNotice(null)
+    try {
+      const df = await api.resampleDataset(id, tf)
+      setFiles(prev => [...(prev ?? []), df])
+      setNotice(`Resampleado a ${tf}: ${fmtNum(df.nBars, 0)} barras. Ya puedes usarlo para generar.`)
+    } catch (e) {
+      setNotice(`No se pudo resamplear: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function onExport(id: number) {
@@ -446,10 +471,30 @@ export function S21DataManager() {
                         label={df.status === 'ready' ? 'LISTO' : '…'} />
                     </td>
                     <td className="px-3 py-2">
-                      <Button size="sm" variant="ghost" loading={busy}
-                        onClick={() => onExport(df.id)} aria-label={`Exportar ${symName(df.symbolId)} ${df.timeframe}`}>
-                        <FileDown size={13} aria-hidden /> Exportar
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        {(destinos[df.id]?.length ?? 0) > 0 && (
+                          <>
+                            <select
+                              className="h-7 rounded-md border border-border-input bg-surface px-1 font-mono text-xs"
+                              aria-label={`Temporalidad destino para ${symName(df.symbolId)} ${df.timeframe}`}
+                              value={tfResample[df.id] ?? ''}
+                              onChange={e => setTfResample({ ...tfResample, [df.id]: e.target.value })}>
+                              <option value="">a…</option>
+                              {destinos[df.id].map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                            <Button size="sm" variant="ghost" loading={busy}
+                              disabled={!tfResample[df.id]}
+                              onClick={() => void onResample(df.id)}
+                              aria-label={`Resamplear ${symName(df.symbolId)} ${df.timeframe}`}>
+                              Resamplear
+                            </Button>
+                          </>
+                        )}
+                        <Button size="sm" variant="ghost" loading={busy}
+                          onClick={() => onExport(df.id)} aria-label={`Exportar ${symName(df.symbolId)} ${df.timeframe}`}>
+                          <FileDown size={13} aria-hidden /> Exportar
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -517,6 +517,257 @@ pub fn export_strategy(
 
 // ── settings mínimos ─────────────────────────────────────────────────
 
+/// Resamplea un dataset a otra temporalidad mayor y lo registra como dataset nuevo.
+///
+/// Con un solo historico m1 se pueden sacar m5, m15, h1, d1... sin volver a
+/// descargar nada.
+#[tauri::command]
+pub fn resample_dataset(
+    app: AppHandle,
+    state: State<AppState>,
+    data_file_id: i64,
+    target_tf: String,
+) -> Result<DataFileRow, String> {
+    let (symbol_id, source_tf, path) = {
+        let db = state.db.lock();
+        let row: (i64, String, String) = db
+            .query_row(
+                "select symbol_id, timeframe, file_path from data_files where id = ?1",
+                q![data_file_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("dataset {data_file_id} no encontrado"))?;
+        row
+    };
+    let bars = datastore::Qfn::read(std::path::Path::new(&path))
+        .map_err(|e| format!("no se pudo leer el dataset: {e}"))?;
+    let resampleados = datastore::resample(&bars, &source_tf, &target_tf)?;
+    if resampleados.is_empty() {
+        return Err("el resample no ha producido barras".into());
+    }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).ok();
+    let nombre = format!("resample_{}_{}", data_file_id, target_tf);
+    let qfn_path = dir.join(format!("{nombre}.qfn"));
+    datastore::Qfn::write(&qfn_path, &resampleados).map_err(|e| e.to_string())?;
+
+    let date_from = resampleados.first().map(|b| b.time).unwrap_or(0);
+    let date_to = resampleados.last().map(|b| b.time).unwrap_or(0);
+    let db = state.db.lock();
+    db.execute(
+        "insert into data_files (symbol_id, timeframe, storage_kind, file_path, compressed_bytes, n_bars, date_from, date_to, status, created_at)
+         values (?1, ?2, 'local_qfd', ?3, ?4, ?5, ?6, ?7, 'ready', ?8)
+         on conflict do update set file_path = excluded.file_path,
+            compressed_bytes = excluded.compressed_bytes, n_bars = excluded.n_bars,
+            date_from = excluded.date_from, date_to = excluded.date_to, status = 'ready'",
+        q![symbol_id, target_tf, qfn_path.to_string_lossy(),
+           std::fs::metadata(&qfn_path).map(|m| m.len() as i64).unwrap_or(0),
+           resampleados.len() as i64, date_from, date_to, now_ts()],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = db.last_insert_rowid();
+    drop(db);
+    Ok(DataFileRow {
+        id, symbol_id, timeframe: target_tf, storage_kind: "local_qfd".into(),
+        compressed_bytes: std::fs::metadata(&qfn_path).map(|m| m.len() as i64).unwrap_or(0),
+        n_bars: resampleados.len() as i64,
+        date_from: Some(date_from), date_to: Some(date_to),
+        status: "ready".into(), created_at: now_ts(),
+    })
+}
+
+/// Temporalidades a las que se puede resamplear un dataset.
+#[tauri::command]
+pub fn list_resample_targets(timeframe: String) -> Result<serde_json::Value, String> {
+    Ok(serde_json::json!({
+        "targets": datastore::tf_targets(&timeframe),
+        "origen": timeframe,
+    }))
+}
+
+// ── Custom Analysis: enlace con scripts de Python ──────────────────
+
+/// Ejecuta un script de Python sobre los datos de una estrategia.
+///
+/// El script lo elige el usuario. Se invoca SIN shell (no se concatenan
+/// comandos) y con un tiempo limite; si se cuelga, se le mata. La salida se
+/// valida antes de trustarla (solo campos conocidos).
+#[tauri::command(async)]
+pub fn run_custom_analysis(
+    app: AppHandle,
+    state: State<AppState>,
+    strategy_id: i64,
+    script_path: String,
+) -> Result<serde_json::Value, String> {
+    let script = std::path::Path::new(&script_path);
+    if !script.exists() {
+        return Err(format!("no encuentro el script '{}'", script_path));
+    }
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let work = dir.join("custom_analysis");
+    std::fs::create_dir_all(&work).ok();
+
+    // ── entrada: estrategia + CSV con las barras ───────────────────
+    let (core, bars_path) = {
+        let db = state.db.lock();
+        let core = load_core(&db, strategy_id)?;
+        let path: String = db
+            .query_row(
+                "select df.file_path from backtest_runs b
+                 join data_files df on df.id = b.data_file_id
+                 where b.strategy_id = ?1 order by b.id desc limit 1",
+                q![strategy_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        (core, path)
+    };
+    // el CSV de barras lo lee el script: se exporta desde el QFN
+    let csv_path = work.join(format!("strategy_{}_bars.csv", strategy_id));
+    if !bars_path.is_empty() {
+        if let Ok(bars) = datastore::Qfn::read(std::path::Path::new(&bars_path)) {
+            let mut s = String::from("time,open,high,low,close,volume\n");
+            for b in &bars {
+                s.push_str(&format!(
+                    "{},{},{},{},{},{}\n",
+                    b.time, b.open, b.high, b.low, b.close, b.volume
+                ));
+            }
+            std::fs::write(&csv_path, s).map_err(|e| e.to_string())?;
+        }
+    }
+    let input_path = work.join(format!("strategy_{}_input.json", strategy_id));
+    let output_path = work.join(format!("strategy_{}_output.json", strategy_id));
+    let contrato = crate::engine::analysis::contract(&core, &csv_path, 0);
+    std::fs::write(&input_path, contrato.to_string()).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&output_path);
+
+    // ── ejecucion: python <script> --input <json> --output <json> ──
+    let mut cmd = std::process::Command::new("python");
+    cmd.arg(script)
+        .arg("--input")
+        .arg(&input_path)
+        .arg("--output")
+        .arg(&output_path)
+        .current_dir(&work)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("no se pudo lanzar python: {e}"))?;
+
+    // espera con tiempo limite (60 s)
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    let salida = child.wait_with_output().ok();
+                    let err = salida
+                        .map(|o| String::from_utf8_lossy(&o.stderr).to_string())
+                        .unwrap_or_default();
+                    let primera = err.trim().lines().next().unwrap_or("").to_string();
+                    let detalle = if primera.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {primera}")
+                    };
+                    return Err(format!("el script termino con error{detalle}"));
+                }
+                break;
+            }
+            Ok(None) => {
+                if std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    return Err("el script no ha terminado en 60 s: se ha detenido".into());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(120));
+            }
+            Err(e) => return Err(format!("error esperando al script: {e}")),
+        }
+    }
+
+    // ── salida ─────────────────────────────────────────────────────
+    let raw_txt = std::fs::read_to_string(&output_path).map_err(|e| {
+        format!("el script no escribio el fichero de salida ({e}): debe crear --output con un JSON")
+    })?;
+    let raw: serde_json::Value = serde_json::from_str(&raw_txt)
+        .map_err(|e| format!("la salida del script no es un JSON valido: {e}"))?;
+    let out = crate::engine::analysis::normalize_output(&raw);
+
+    let db = state.db.lock();
+    let id = crate::engine::analysis::store(&db, strategy_id, &script_path, &out, &contrato)?;
+    drop(db);
+    Ok(serde_json::json!({
+        "id": id,
+        "resultado": out,
+        "input": contrato,
+        "script": script_path,
+    }))
+}
+
+/// Historial de analisis personalizados.
+#[tauri::command]
+pub fn list_custom_analyses(
+    state: State<AppState>,
+    strategy_id: Option<i64>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock();
+    let rows = crate::engine::analysis::list(&db, strategy_id, limit.unwrap_or(50))?;
+    Ok(serde_json::json!({ "rows": rows }))
+}
+
+/// Escribe un CSV con las barras de una estrategia (para scripts o para mirar).
+#[tauri::command]
+pub fn export_strategy_csv(
+    app: AppHandle,
+    state: State<AppState>,
+    strategy_id: i64,
+) -> Result<String, String> {
+    let path: String = {
+        let db = state.db.lock();
+        db.query_row(
+            "select df.file_path from backtest_runs b
+             join data_files df on df.id = b.data_file_id
+             where b.strategy_id = ?1 order by b.id desc limit 1",
+            q![strategy_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default()
+    };
+    if path.is_empty() {
+        return Err("esta estrategia no tiene dataset cargado".into());
+    }
+    let bars = datastore::Qfn::read(std::path::Path::new(&path)).map_err(|e| e.to_string())?;
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("exports");
+    std::fs::create_dir_all(&dir).ok();
+    let nombre: String = {
+        let db = state.db.lock();
+        db.query_row("select name from strategies where id = ?1", q![strategy_id], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| format!("estrategia_{strategy_id}"))
+    };
+    let out = dir.join(format!("{nombre}_bars.csv"));
+    let mut s = String::from("time,open,high,low,close,volume\n");
+    for b in &bars {
+        s.push_str(&format!("{},{},{},{},{},{}\n", b.time, b.open, b.high, b.low, b.close, b.volume));
+    }
+    std::fs::write(&out, s).map_err(|e| e.to_string())?;
+    Ok(out.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock();
@@ -832,6 +1083,7 @@ pub fn run_retest(
     strategy_ids: Vec<i64>,
     symbol_ids: Vec<i64>,
     timeframe: String,
+    periodos: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     let db = state.db.lock();
     let cfg = EngineCfg::default();
@@ -866,13 +1118,29 @@ pub fn run_retest(
         let orig = ops::stored_metrics(&db, id);
         let core = load_core(&db, id);
 
-        // 1) out-of-sample dentro de su propio mercado (lo de siempre)
+        // 1) out-of-sample dentro de su propio mercado, en k periodos
+        let k = periodos.unwrap_or(1).clamp(1, 12);
         let origen = match &core {
-            Ok(c) => match ops::retest_one(c, orig.as_ref(), &cfg) {
-                Ok(v) => v,
+            Ok(c) => match ops::retest_periods(&c.bars, c.template, c.params, &cfg, k) {
+                Ok(v) => {
+                    // el primer periodo OOS es el que se muestra como "retest"
+                    let primer = v["periodos"].as_array().and_then(|ps| ps.first().cloned());
+                    serde_json::json!({
+                        "original": orig.as_ref().map(ops::metrics_json),
+                        "retest": primer.as_ref().map(|p| p["metrics"].clone()).unwrap_or(serde_json::Value::Null),
+                        "verdict": primer.as_ref().map(|p| p["verdict"].clone()).unwrap_or(serde_json::json!("fail")),
+                        "note": primer.as_ref().map(|p| p["nota"].clone()).unwrap_or(serde_json::json!("")),
+                        "periodos": v["periodos"].clone(),
+                        "consistencia": v["consistencia"].clone(),
+                    })
+                }
                 Err(e) => serde_json::json!({
                     "original": orig.as_ref().map(ops::metrics_json),
                     "retest": serde_json::Value::Null, "verdict": "fail", "note": e,
+                    "periodos": serde_json::Value::Array(vec![]),
+                    "consistencia": serde_json::json!({
+                        "verdict": "fail", "detalle": "no se pudo evaluar", "pasados": 0, "total": k,
+                    }),
                 }),
             },
             Err(e) => serde_json::json!({

@@ -404,8 +404,10 @@ export const api = {
 
   // ── Fase 3: retest · improver · optimizer · SPP · portfolio · projects (fake) ──
 
-  async runRetest(strategyIds: number[], symbolIds: number[], timeframe: Timeframe): Promise<RetestResult> {
-    const r = await real<RetestResult>('run_retest', { strategyIds, symbolIds, timeframe })
+  async runRetest(
+    strategyIds: number[], symbolIds: number[], timeframe: Timeframe, periodos = 1,
+  ): Promise<RetestResult> {
+    const r = await real<RetestResult>('run_retest', { strategyIds, symbolIds, timeframe, periodos })
     if (r) return r
     await delay(900)
     // fake: cada mercado se comporta de forma distinta (a veces sin datos)
@@ -945,6 +947,69 @@ export const api = {
     return { rows, kinds }
   },
 
+  /** Resamplea un dataset a una temporalidad mayor y lo registra. */
+  async resampleDataset(dataFileId: number, targetTf: string): Promise<DataFileRec> {
+    const r = await realStrict<DataFileRec>('resample_dataset', { dataFileId, targetTf })
+    if (!r) throw new Error('El resample real solo funciona en la app de escritorio.')
+    return r
+  },
+
+  /** Temporalidades a las que se puede resamplear un dataset. */
+  async listResampleTargets(timeframe: string): Promise<string[]> {
+    const r = await real<{ targets: string[] }>('list_resample_targets', { timeframe })
+    if (r?.targets) return r.targets
+    const todos = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1', 'w1', 'mn1']
+    const min: Record<string, number> = {
+      m1: 1, m5: 5, m15: 15, m30: 30, h1: 60, h4: 240, d1: 1440, w1: 10080, mn1: 43200,
+    }
+    const f = min[timeframe] ?? 1
+    return todos.filter(t => (min[t] ?? 0) > f)
+  },
+
+  /**
+   * Abre el selector de ficheros nativo y devuelve la ruta elegida.
+   * `extensions` filtra por tipo (p. ej. ['py']).
+   */
+  async pickFile(extensions: string[] = []): Promise<string | null> {
+    if (!isTauri()) return null
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const res = await open({
+      multiple: false,
+      directory: false,
+      filters: extensions.length ? [{ name: extensions.join('/'), extensions }] : undefined,
+    })
+    return typeof res === 'string' ? res : null
+  },
+
+  /**
+   * Ejecuta un script de Python sobre los datos de la estrategia.
+   * El script recibe --input <json> y debe escribir --output <json>.
+   */
+  async runCustomAnalysis(
+    strategyId: number, scriptPath: string,
+  ): Promise<{ id: number; resultado: { veredicto: string; etiqueta: string; metricas: Record<string, number>; notas: string }; input: unknown; script: string }> {
+    const r = await realStrict<{ id: number; resultado: { veredicto: string; etiqueta: string; metricas: Record<string, number>; notas: string }; input: unknown; script: string }>(
+      'run_custom_analysis', { strategyId, scriptPath })
+    if (!r) throw new Error('El analisis personalizado solo funciona en la app de escritorio.')
+    return r
+  },
+
+  /** Historial de analisis personalizados. */
+  async listCustomAnalyses(strategyId?: number): Promise<Array<{ id: number; script: string; verdict: string; label: string; output: { veredicto: string; etiqueta: string; metricas: Record<string, number>; notas: string }; createdAt: number }>> {
+    const r = await real<{ rows: Array<{ id: number; script: string; verdict: string; label: string; output: { veredicto: string; etiqueta: string; metricas: Record<string, number>; notas: string }; createdAt: number }> }>(
+      'list_custom_analyses', { strategyId: strategyId ?? null })
+    if (r?.rows) return r.rows
+    await delay(80)
+    return []
+  },
+
+  /** Exporta las barras de la estrategia a CSV (util para scripts). */
+  async exportStrategyCsv(strategyId: number): Promise<string> {
+    const r = await realStrict<string>('export_strategy_csv', { strategyId })
+    if (!r) throw new Error('La exportacion real solo funciona en la app de escritorio.')
+    return r
+  },
+
   /** Borra una entrada del historial. */
   async deleteAnalysisRun(id: number): Promise<boolean> {
     const r = await real<boolean>('delete_analysis_run', { id })
@@ -1109,10 +1174,32 @@ export interface RetestResumen {
   fail: number
 }
 
+export interface RetestPeriodo {
+  indice: number
+  desde: number
+  hasta: number
+  barras: number
+  verdict: 'pass' | 'warn' | 'fail'
+  nota: string
+  metrics: Metrics
+}
+
+export interface RetestConsistencia {
+  verdict: 'pass' | 'warn' | 'fail' | 'pending'
+  detalle: string
+  pasados: number
+  total: number
+  peorPF?: number
+}
+
 export interface RetestFila {
   strategyId: number
   /** out-of-sample dentro de su propio mercado */
   origen: RetestRow
+  /** ventanas OOS evaluadas por separado */
+  periodos?: RetestPeriodo[]
+  /** consistencia entre esas ventanas */
+  consistencia?: RetestConsistencia
   /** la misma regla en cada mercado destino */
   mercados: RetestMercado[]
   resumen: RetestResumen
