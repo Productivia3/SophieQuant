@@ -30,6 +30,8 @@ test.describe('Bloque de mejoras 1', () => {
 
   test('M1-H2 la cartera sugiere miembros y explica los descartes', async ({ page }) => {
     await page.goto('/#/portfolio')
+    // esperar a que la lista de estrategias este cargada
+    await expect(page.getByLabel(/añadir .* a la cartera/i).first()).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: /sugerir cartera/i }).click()
     await expect(page.getByRole('heading', { name: /sugerencia de cartera/i })).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(/se descartan y por que/i)).toBeVisible()

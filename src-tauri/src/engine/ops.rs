@@ -90,6 +90,7 @@ pub fn stored_metrics(db: &Connection, strategy_id: i64) -> Option<Metrics> {
                     avg_trade: r.get::<_, Option<f64>>(11)?.unwrap_or(0.0),
                     wfe: 0.0,
                                 mae_pct: 0.0, mfe_pct: 0.0,
+                                sharpe_anual: 0.0, sortino_anual: 0.0,
             })
             },
         )
@@ -858,6 +859,8 @@ pub fn metrics_json(m: &Metrics) -> Value {
         "sharpe": round2(m.sharpe), "sortino": round2(m.sortino),
         "zScore": round2(m.z_score), "rSquared": round3(m.r_squared),
         "nTrades": m.n_trades, "avgTrade": round2(m.avg_trade), "wfe": round1(m.wfe),
+        "sharpeAnual": m.sharpe_anual, "sortinoAnual": m.sortino_anual,
+        "maePct": round2(m.mae_pct), "mfePct": round2(m.mfe_pct),
     })
 }
 

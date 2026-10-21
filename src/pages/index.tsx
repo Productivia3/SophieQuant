@@ -593,7 +593,12 @@ export function S05Strategy() {
             <StatCard label="Profit factor" value={m?.profitFactor ?? 0} tone={(m?.profitFactor ?? 0) >= 1.3 ? 'pass' : 'fail'} />
             <StatCard label="Tasa de acierto" value={(m?.winRate ?? 0) * 100} unit="%" />
             <StatCard label="Max DD" value={m?.maxDD ?? 0} unit="%" tone="fail" />
-            <StatCard label="Sharpe" value={m?.sharpe ?? 0} />
+            <StatCard label="Sharpe anualizado" value={m?.sharpeAnual ?? 0}
+              hint="Sobre retornos diarios, comparable con MT5" />
+            <StatCard label="Sharpe por operacion" value={m?.sharpe ?? 0}
+              hint="El otro Sharpe: por operacion, no anualizado" />
+            <StatCard label="MAE medio" value={m?.maePct ?? 0} unit="%"
+              hint="Lo peor que se puso cada posicion" />
             <StatCard label="Trades" value={m?.nTrades ?? 0} />
           </StatRow>
 

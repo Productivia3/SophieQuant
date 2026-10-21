@@ -509,18 +509,84 @@ export function S21DataManager() {
 
 /* ───────────────────── S23 · Ajustes globales ────────────────────── */
 
+
+/** Una fila editable de metadatos de mercado. */
+function MetaFila({ sym, onGuardar }: {
+  sym: {
+    id: number; name: string
+    pipSize: number; contractSize: number; commission: number
+    swapLong: number; swapShort: number
+    spreadAsia: number | null; spreadLondon: number | null; spreadNy: number | null
+  }
+  onGuardar: (m: {
+    pipSize?: number; contractSize?: number; commission?: number
+    swapLong?: number; swapShort?: number
+    spreadAsia?: number | null; spreadLondon?: number | null; spreadNy?: number | null
+  }) => void
+}) {
+  const [v, setV] = useState({
+    pipSize: sym.pipSize,
+    contractSize: sym.contractSize,
+    commission: sym.commission,
+    swapLong: sym.swapLong,
+    swapShort: sym.swapShort,
+    spreadAsia: sym.spreadAsia,
+    spreadLondon: sym.spreadLondon,
+    spreadNy: sym.spreadNy,
+  })
+  const num = 'h-7 w-20 rounded-md border border-border-input bg-surface px-1.5 font-mono text-xs'
+  const campo = (clave: keyof typeof v, etiqueta: string) => (
+    <input type="number" step="0.01" className={num} aria-label={`${etiqueta} de ${sym.name}`}
+      value={v[clave] ?? ''}
+      onChange={e => setV({ ...v, [clave]: e.target.value === '' ? null : +e.target.value })} />
+  )
+  return (
+    <tr className="hover:bg-surface-raised">
+      <td className="px-2 py-1 font-medium">{sym.name}</td>
+      <td className="px-2 py-1">{campo('pipSize', 'Pip')}</td>
+      <td className="px-2 py-1">{campo('contractSize', 'Contrato')}</td>
+      <td className="px-2 py-1">{campo('commission', 'Comision')}</td>
+      <td className="px-2 py-1">{campo('swapLong', 'Swap largo')}</td>
+      <td className="px-2 py-1">{campo('swapShort', 'Swap corto')}</td>
+      <td className="px-2 py-1">{campo('spreadAsia', 'Spread Asia')}</td>
+      <td className="px-2 py-1">{campo('spreadLondon', 'Spread Londres')}</td>
+      <td className="px-2 py-1">{campo('spreadNy', 'Spread Nueva York')}</td>
+      <td className="px-2 py-1 text-right">
+        <Button size="sm" variant="ghost"
+          aria-label={`Guardar metadatos de ${sym.name}`}
+          onClick={() => onGuardar(v as never)}>Guardar</Button>
+      </td>
+    </tr>
+  )
+}
+
 export function S23Settings() {
   const [s, setS] = useState<AppSettings | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [simbolos, setSimbolos] = useState<Awaited<ReturnType<typeof api.listSymbolMeta>>>([])
+  const [metaMsg, setMetaMsg] = useState<string | null>(null)
 
-  useEffect(() => { api.getSettings().then(setS) }, [])
+  useEffect(() => {
+    api.getSettings().then(setS)
+    api.listSymbolMeta().then(setSimbolos)
+  }, [])
 
   async function save() {
     if (!s) return
     setBusy(true); setSaved(false)
     await api.updateSettings(s)
     setSaved(true); setBusy(false)
+  }
+
+  async function guardarMeta(id: number, meta: Parameters<typeof api.updateSymbolMeta>[1]) {
+    try {
+      await api.updateSymbolMeta(id, meta)
+      setMetaMsg('Metadatos del s\u00edmbolo guardados. A partir de ahora el motor los usa en los pr\u00f3ximos an\u00e1lisis.')
+      setSimbolos(await api.listSymbolMeta())
+    } catch (e) {
+      setMetaMsg(e instanceof Error ? e.message : String(e))
+    }
   }
 
   if (!s) return <Page title="Ajustes" icon={<Activity size={16} />}><TableSkeleton /></Page>
@@ -534,7 +600,48 @@ export function S23Settings() {
           <Save size={14} aria-hidden /> Guardar ajustes
         </Button>
       }>
-      <div className="mx-auto max-w-2xl space-y-4 p-4">
+      <div className="mx-auto max-w-3xl space-y-4 p-4">
+        <section className="rounded-md border border-border bg-surface p-3">
+          <h2 className="mb-1 text-sm font-semibold text-muted">Metadatos de mercado por s\u00edmbolo</h2>
+          <p className="mb-3 text-xs text-muted">
+            El motor usa estos valores, no los gen\u00e9ricos: el pip, el tama\u00f1o de contrato, la
+            comisi\u00f3n, los swaps por noche y el spread de cada sesi\u00f3n (Asia / Londres / Nueva York).
+            Los swaps del broker cambian cada semana: actual\u00edzalos.
+          </p>
+          {metaMsg && (
+            <p className="mb-2 rounded-md border border-border bg-surface-raised p-2 text-xs text-muted" role="status">
+              {metaMsg}
+            </p>
+          )}
+          {simbolos.length === 0 ? (
+            <p className="text-xs text-muted">Sin s\u00edmbolos dados de alta.</p>
+          ) : (
+            <div className="overflow-x-auto qf-scroll">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted">
+                    <th className="px-2 py-1 font-medium">S\u00edmbolo</th>
+                    <th className="px-2 py-1 font-medium">Pip</th>
+                    <th className="px-2 py-1 font-medium">Contrato</th>
+                    <th className="px-2 py-1 font-medium">Comisi\u00f3n</th>
+                    <th className="px-2 py-1 font-medium">Swap largo</th>
+                    <th className="px-2 py-1 font-medium">Swap corto</th>
+                    <th className="px-2 py-1 font-medium">Spread Asia</th>
+                    <th className="px-2 py-1 font-medium">Londres</th>
+                    <th className="px-2 py-1 font-medium">N. York</th>
+                    <th className="px-2 py-1" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {simbolos.map(sym => (
+                    <MetaFila key={sym.id} sym={sym} onGuardar={(m) => guardarMeta(sym.id, m)} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
         {saved && (
           <p className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success" role="status">
             Ajustes guardados.

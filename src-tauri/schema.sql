@@ -8,7 +8,13 @@ create table if not exists symbols (
   exchange text,
   tick_size real not null default 0.00001,
   pip_size real not null default 0.0001,
-  commission real not null default 0
+  commission real not null default 0,
+  contract_size real not null default 100000,   -- unidades por lote (100000 forex, 50 ES, 1 acciones)
+  swap_long real not null default 0,            -- dinero por lote y noche (swap del broker)
+  swap_short real not null default 0,
+  spread_asia real,                            -- spread en pips por sesion (null = plano)
+  spread_london real,
+  spread_ny real
 );
 
 create table if not exists data_files (

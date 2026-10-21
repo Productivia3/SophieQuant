@@ -2,6 +2,55 @@
 
 use super::types::{Metrics, Trade};
 
+
+/// Retornos diarios a partir de las operaciones.
+///
+/// El Sharpe "por operacion" que se usaba antes **no** es comparable con el de
+/// una serie de equity por tiempo (ni con el del tester de MT5). Aqui se
+/// construye la curva diaria real y se annualiza con 252 dias, que es lo
+/// standard.
+pub fn daily_returns(trades: &[Trade], initial: f64) -> Vec<f64> {
+    if trades.is_empty() { return vec![] }
+    let mut balance = initial;
+    let mut por_dia: Vec<(i64, f64)> = Vec::new();
+    for t in trades {
+        balance += t.profit;
+        let dia = t.close_time.div_euclid(86_400);
+        match por_dia.last_mut() {
+            Some((d, _)) if *d == dia => {
+                if let Some(u) = por_dia.last_mut() { u.1 = balance; }
+            }
+            _ => por_dia.push((dia, balance)),
+        }
+    }
+    let mut rets: Vec<f64> = Vec::with_capacity(por_dia.len());
+    let mut anterior = initial;
+    for (_, v) in por_dia {
+        if anterior.abs() > 1e-9 {
+            rets.push((v - anterior) / anterior.abs());
+        }
+        anterior = v;
+    }
+    rets
+}
+
+/// Sharpe y Sortino anualizados sobre los retornos diarios.
+pub fn sharpe_annualized(trades: &[Trade], initial: f64) -> (f64, f64) {
+    let rets = daily_returns(trades, initial);
+    if rets.len() < 2 { return (0.0, 0.0) }
+    let n = rets.len() as f64;
+    let media = rets.iter().sum::<f64>() / n;
+    let var = rets.iter().map(|r| (r - media) * (r - media)).sum::<f64>() / (n - 1.0);
+    let sd = var.max(0.0).sqrt();
+    let downside: Vec<f64> = rets.iter().map(|r| (r - media).min(0.0)).collect();
+    let var_d = downside.iter().map(|d| d * d).sum::<f64>() / (n - 1.0);
+    let sd_d = var_d.max(0.0).sqrt();
+    let raiz = 252.0f64.sqrt();
+    let sharpe = if sd > 0.0 { media / sd * raiz } else { 0.0 };
+    let sortino = if sd_d > 0.0 { media / sd_d * raiz } else { 0.0 };
+    ((sharpe * 100.0).round() / 100.0, (sortino * 100.0).round() / 100.0)
+}
+
 pub fn compute(trades: &[Trade], equity: &[f64], initial: f64) -> Metrics {
     let mut m = Metrics::default();
     m.n_trades = trades.len() as u32;
@@ -25,6 +74,10 @@ pub fn compute(trades: &[Trade], equity: &[f64], initial: f64) -> Metrics {
     }
     m.max_dd = if peak > 0.0 { max_dd_money / peak * 100.0 } else { 0.0 };
     m.rdd = if max_dd_money > 0.0 { m.net_profit / max_dd_money } else { 0.0 };
+    // Sharpe/Sortino anualizados (base diaria): comparables con MT5
+    let (sh_a, so_a) = sharpe_annualized(trades, initial);
+    m.sharpe_anual = sh_a;
+    m.sortino_anual = so_a;
 
     // sharpe/sortino simplificados con retornos por trade
     let wins: Vec<f64> = profits.iter().filter(|p| **p > 0.0).copied().collect();

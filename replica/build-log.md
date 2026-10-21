@@ -801,3 +801,33 @@ Tercer bloque de mejoras, en el orden acordado (1 -> 3 -> 2).
 - **Numeros**: paridad de 64,0 a **65,8** (total) y de 67,0 a **68,8** (alcance).
   Las filas de graficos (MAE-MFE, overlays) pasan a completas, y el ajuste
   automatico de cartera se registra como funcion propia.
+
+---
+
+## Bloque 0 del plan: el motor deja de mentir - 21-10-2026
+
+Primer bloque del plan de `replica/analisis-experto.md`. Los fallos que
+invalidaban las medidas, corregidos:
+
+- **Cfg por simbolo** (`cfg_for_symbol` / `cfg_for_symbol_id`): el motor lee del
+  simbolo `tick_size`, `pip_size`, `commission`, `contract_size`, `swap_long`,
+  `swap_short` y los spreads por sesion. El P&L pasa a ser
+  `(precio de salida - precio de entrada) x contract_size x lotes`, con lo que el
+  backtest deja de ser valido solo para pares USD-quote de Forex. Se aplicaba en
+  la build, el retesteo, los veredictos, el refinador, el optimizador, la matriz
+  WF, el SPP, el Monte Carlo, el perfil, el chart y el perfil de riesgo.
+- **Max DD sobre la curva completa**: las metricas se calculan con la serie
+  entera (un punto por operacion); la muestreada a 500 puntos solo se pinta. Con
+  muchas operaciones, el drawdown ya no queda subestimado.
+- **Swap por noche**: se cobra por cada noche que la posicion sigue abierta.
+- **Spread por sesion**: Asia / Londres / Nueva York, con la hora UTC de la
+  entrada y de la salida.
+- **Sharpe por periodo**: se anade `sharpeAnual` (retornos diarios, 252 dias,
+  comparable con MT5) y se distingue del `sharpe` por operacion. Tambien MAE/MFE en
+  las metricas exposed.
+- **Editor de metadatos en Ajustes**: pip, contrato, comision, swaps y spread de
+  cada sesion, porque los swaps del broker cambian cada semana.
+- **Transparencia de formulas**: las tarjetas de metricas admiten una explicacion
+  de como se calcula cada una.
+
+Tests: 68 Rust (5 nuevos) y 103 e2e. 0 avisos de compilacion.

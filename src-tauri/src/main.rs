@@ -33,6 +33,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_symbols,
+            commands::get_symbol_meta,
+            commands::update_symbol_meta,
             commands::list_build_metrics,
             commands::list_data_files,
             commands::import_data_csv,

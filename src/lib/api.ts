@@ -1113,6 +1113,35 @@ export const api = {
     return r
   },
 
+  /** Metadatos de mercado de los simbolos (los que usa el motor de verdad). */
+  async listSymbolMeta(): Promise<Array<{
+    id: number; name: string; assetClass: string
+    tickSize: number; pipSize: number; commission: number; contractSize: number
+    swapLong: number; swapShort: number
+    spreadAsia: number | null; spreadLondon: number | null; spreadNy: number | null
+  }>> {
+    const r = await real<{ symbols: Array<{
+      id: number; name: string; assetClass: string
+      tickSize: number; pipSize: number; commission: number; contractSize: number
+      swapLong: number; swapShort: number
+      spreadAsia: number | null; spreadLondon: number | null; spreadNy: number | null
+    }> }>('get_symbol_meta')
+    if (r?.symbols) return r.symbols
+    await delay(80)
+    return []
+  },
+
+  /** Actualiza los metadatos de mercado de un simbolo. */
+  async updateSymbolMeta(symbolId: number, meta: {
+    tickSize?: number; pipSize?: number; commission?: number; contractSize?: number
+    swapLong?: number; swapShort?: number
+    spreadAsia?: number | null; spreadLondon?: number | null; spreadNy?: number | null
+  }): Promise<boolean> {
+    const r = await realStrict<boolean>('update_symbol_meta', { symbolId, ...meta })
+    if (r == null) return false
+    return r
+  },
+
   /** Veredictos ya calculados (cache en la DB). */
   async listVerdicts(strategyIds: number[]): Promise<StrategyVerdicts[]> {
     const r = await real<{ rows: StrategyVerdicts[] }>('get_strategy_verdicts', { strategyIds })

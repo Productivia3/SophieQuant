@@ -42,7 +42,7 @@ indicadores, más plantillas) están deliberadamente al final y marcadas como
 
 Ordenados por impacto. Cada uno indica el fichero y el efecto.
 
-### 1.1 El motor asume Forex y descarta los metadatos que ya tiene — **crítico**
+### 1.1 El motor asume Forex y descarta los metadatos que ya tiene — **crítico · RESUELTO (21-10)**
 
 `EngineCfg::default()` se usa en **19 sitios** (`commands.rs`, `ops.rs`). Su
 `pip_size` es 0,0001 y el P&L asume **1 lote = 100 000 unidades**.
@@ -63,7 +63,7 @@ Consecuencias concretas:
 muchísimo el universo con el que puedes trabajar, y es un bug silencioso: no
 falla, da números.
 
-### 1.2 El Max DD se calcula sobre una curva muestreada — **crítico**
+### 1.2 El Max DD se calcula sobre una curva muestreada — **crítico · RESUELTO (21-10)**
 
 `backtest.rs`:
 ```rust
@@ -117,21 +117,21 @@ utilizable. Con 3 plantillas × 3 parámetros continuos, el programa **no puede
 encontrar nada que no sea un cruce de medias o un RSI**. Ese es el techo real
 del producto hoy, y conviene decirlo sin rodeos.
 
-### 1.6 No hay swap ni coste overnight — **alto**
+### 1.6 No hay swap ni coste overnight — **alto · RESUELTO (21-10)**
 
 Cero apariciones de *swap*, *overnight*, *interest* en el motor. Una estrategia
 que aguanta tres sesiones tiene un resultado dominado por los swaps, y el motor
 no los conoce. En Forex, en estrategias de medio plazo, el swap es del mismo
 orden que el spread.
 
-### 1.7 El spread es constante — **medio**
+### 1.7 El spread es constante — **medio · RESUELTO (21-10)**
 
 `spread` es un número fijo en pips, igual las 24 horas. El spread real se
 multiplica por 3-5 en la apertura de Londres/NY y se estrecha en Asia. Para
 intradía, esto solo (sin swap) puede explicar la mitad de la diferencia entre
 tu backtest y el broker.
 
-### 1.8 El Sharpe de la app no es el Sharpe de MT5 — **medio**
+### 1.8 El Sharpe de la app no es el Sharpe de MT5 — **medio · RESUELTO (21-10)**
 
 `metrics::compute` calcula Sharpe y Sortino sobre **retornos por operación**, sin
 annualizar. Son números sin significado comparables con los de una serie de
@@ -306,3 +306,30 @@ Con los bloques 0, 1 y 2, este programa deja de ser «un generador que produce
 resultados» y pasa a ser **«un instrumento que dice si un resultado es real»**.
 Eso es exactamente el hueco que la investigación de tus usuarios décritió, y es
 el único que no tiene la competencia.
+
+---
+
+## Addendum 21-10-2026: bloque 0 cerrado (el motor ya no miente)
+
+Los cuatro fallos que invalidaban las medidas están corregidos y con tests:
+
+| Que estaba mal | Ahora |
+| --- | --- |
+| El motor usaba `EngineCfg::default()` (pip 0,0001, 1 lote = 100 000) para todo | `cfg_for_symbol` / `cfg_for_symbol_id` leen del símbolo: `tick_size`, `pip_size`, `commission`, `contract_size`, `swap_long`, `swap_short` y los spreads por sesión. **El P&L es `(Δprecio) × contract_size × lotes`**, así que funciona para Forex, futuros y acciones |
+| El Max DD se medía sobre la curva muestreada a 500 puntos | Las **métricas** se calculan sobre la curva **completa** (una punto por operación); la curva muestreada solo se usa para pintar. Test con más de 500 operaciones que lo comprueba |
+| Sin swap | El swap se cobra **por cada noche** que la posición sigue abierta (y se descuenta del beneficio) |
+| Spread constante de día y de noche | El spread se elige **por sesión** (Asia / Londres / Nueva York) según la hora UTC de la entrada y de la salida |
+| El «Sharpe» era por operación y no anualizado | Hay **dos métricas distintas y con nombre explícito**: `sharpe` (por operación) y `sharpeAnual` (retornos **diarios**, anualizado con 252 días, comparable con MT5). La tarjeta de estrategia las muestra las dos con explicación |
+
+Además, en Ajustes hay un **editor de metadatos por símbolo** (pip, contrato, comisión,
+swaps y spread de cada sesión): los swaps del broker cambian cada semana y el
+usuario tiene que poder ponerlos. Y las tarjetas de métricas admiten ya una
+explicación (`hint`) de cómo se calcula cada una —la transparencia de fórmulas que
+la investigación señalaba como P0—.
+
+Tests nuevos: 5 (drawdown sobre la curva completa, spread por sesión, swap por
+noche, cfg por símbolo, Sharpe anualizado sobre retornos diarios).
+
+**Siguiente bloque: el 1** (validación que se puede creer): walk-forward rolling de
+verdad, Deflated Sharpe Ratio y PBO, reglas de mínimo de muestra y de parada, y
+block bootstrap en el Monte Carlo.

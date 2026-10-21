@@ -708,6 +708,7 @@ export function S18Portfolio() {
           <div className="mb-2 flex items-center gap-2">
             <h2 className="text-sm font-semibold text-muted">Estrategias (2–8)</h2>
             <Button size="sm" variant="secondary" loading={busy}
+              disabled={!rows?.length}
               onClick={() => void sugerir()} className="ml-auto">
               Sugerir cartera
             </Button>

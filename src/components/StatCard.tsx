@@ -9,16 +9,25 @@ interface Props {
   tone?: 'neutral' | 'pass' | 'fail'
   mono?: boolean
   className?: string
+  /**
+   * Explicacion de como se calcula la metrica. Se muestra al pasar el raton y
+   * como texto para lectores de pantalla: la transparencia de las formulas es
+   * una de las cosas que mas se echa de menos en las herramientas de la categoria.
+   */
+  hint?: string
 }
 
-export function StatCard({ label, value, unit, delta, tone = 'neutral', mono = true, className }: Props) {
+export function StatCard({ label, value, unit, delta, tone = 'neutral', mono = true, className, hint }: Props) {
   const isNum = typeof value === 'number'
   return (
     <div className={cn(
       'rounded-md bg-surface-raised border border-border px-3 py-2 min-w-[104px]',
       className,
-    )}>
-      <div className="text-xs text-muted font-medium">{label}</div>
+    )} title={hint}>
+      <div className="text-xs text-muted font-medium">
+        {label}
+        {hint && <span aria-hidden className="ml-1 cursor-help text-muted/70">?</span>}
+      </div>
       <div className={cn(
         'text-lg mt-0.5',
         mono && 'font-mono',
@@ -33,6 +42,7 @@ export function StatCard({ label, value, unit, delta, tone = 'neutral', mono = t
           </span>
         )}
       </div>
+      {hint && <span className="sr-only">{hint}</span>}
     </div>
   )
 }

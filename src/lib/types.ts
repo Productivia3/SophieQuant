@@ -50,6 +50,12 @@ export interface Metrics {
   nTrades: number
   avgTrade: number
   wfe: number
+  /** Sharpe/Sortino anualizados (base diaria, comparable con MT5). */
+  sharpeAnual?: number
+  sortinoAnual?: number
+  /** MAE/MFE medios en % del precio de entrada. */
+  maePct?: number
+  mfePct?: number
 }
 
 export interface BacktestRunRec {

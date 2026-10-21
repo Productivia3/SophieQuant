@@ -31,10 +31,12 @@ pub fn seed_symbols(db: &Connection) -> rusqlite::Result<()> {
         .query_row("select count(*) from symbols", [], |r| r.get(0)).ok();
     if have.unwrap_or(0) > 0 { return Ok(()) }
     db.execute_batch(r#"
-      insert into symbols (name, asset_class, exchange, tick_size, pip_size, commission) values
-        ('EURUSD','forex',null,0.00001,0.0001,0.0),
-        ('GBPUSD','forex',null,0.00001,0.0001,0.0),
-        ('USDJPY','forex',null,0.001,0.01,0.0);"#)?;
+      insert into symbols (name, asset_class, exchange, tick_size, pip_size, commission,
+                           contract_size, swap_long, swap_short,
+                           spread_asia, spread_london, spread_ny) values
+        ('EURUSD','forex',null,0.00001,0.0001,0.0,100000,0.0,0.0, 0.7, 1.0, 1.3),
+        ('GBPUSD','forex',null,0.00001,0.0001,0.0,100000,0.0,0.0, 0.9, 1.2, 1.5),
+        ('USDJPY','forex',null,0.001,0.01,0.0,100000,0.0,0.0, 0.7, 1.0, 1.3);"#)?;
     Ok(())
 }
 
@@ -80,6 +82,175 @@ pub fn list_build_metrics() -> Result<serde_json::Value, String> {
         .map(|(key, peso, desc)| serde_json::json!({ "key": key, "peso": peso, "desc": desc }))
         .collect();
     Ok(serde_json::json!({ "metrics": metrics, "pesos": pesos }))
+}
+
+/// Configuracion del motor a partir de un **simbolo** (para la build, que aun
+/// no tiene estrategia).
+fn cfg_for_symbol_id(db: &Connection, symbol_id: i64) -> EngineCfg {
+    let mut cfg = EngineCfg::default();
+    let fila: Option<(f64, f64, f64, f64, f64, f64, Option<f64>, Option<f64>, Option<f64>)> = db
+        .query_row(
+            "select tick_size, pip_size, commission, contract_size, swap_long, swap_short,
+                    spread_asia, spread_london, spread_ny
+             from symbols where id = ?1",
+            q![symbol_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
+        )
+        .optional()
+        .unwrap_or(None);
+    if let Some((tick, pip, comision, contrato, swap_l, swap_s, asia, london, ny)) = fila {
+        cfg.tick_size = tick;
+        cfg.pip_size = pip;
+        cfg.commission_per_lot = comision;
+        cfg.contract_size = contrato;
+        cfg.swap_long = swap_l;
+        cfg.swap_short = swap_s;
+        cfg.spread_asia = asia;
+        cfg.spread_london = london;
+        cfg.spread_ny = ny;
+    }
+    cfg
+}
+
+/// Configuracion del motor **de la estrategia**, tomada de su simbolo.
+///
+/// Antes el motor usaba siempre `EngineCfg::default()`: pip 0,0001 y 1 lote =
+/// 100 000 unidades para todo. Eso hacia que en USDJPY el spread se aplicara
+/// 100 veces menor de lo real y que en futuros o acciones el P&L fuera erroneo.
+/// Ahora se leen los metadatos del simbolo (tick, pip, comision, contract size,
+/// swaps y spreads por sesion) y se combinan con lo que si es de la estrategia
+/// (balance, lotes, gestion de salida).
+fn cfg_for_symbol(db: &Connection, strategy_id: i64) -> EngineCfg {
+    let mut cfg = EngineCfg::default();
+    // lo guardado en la ultima corrida (balance, lotes, stop/objetivo)
+    let engine_guardado: Option<String> = db
+        .query_row(
+            "select engine_cfg from backtest_runs where strategy_id = ?1 order by id desc limit 1",
+            q![strategy_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .unwrap_or(None)
+        .flatten();
+    if let Some(s) = engine_guardado {
+        if let Ok(guardado) = serde_json::from_str::<EngineCfg>(&s) {
+            cfg.initial_balance = guardado.initial_balance;
+            cfg.fixed_lots = guardado.fixed_lots;
+            cfg.slippage = guardado.slippage;
+            cfg.sl_atr_mult = guardado.sl_atr_mult;
+            cfg.tp_atr_mult = guardado.tp_atr_mult;
+        }
+    }
+    // y ahora los datos de mercado del simbolo
+    let sym: Option<i64> = db
+        .query_row(
+            "select symbol_id from strategies where id = ?1",
+            q![strategy_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .unwrap_or(None);
+    if let Some(sym) = sym {
+        let fila: Option<(f64, f64, f64, f64, f64, f64, Option<f64>, Option<f64>, Option<f64>)> = db
+            .query_row(
+                "select tick_size, pip_size, commission, contract_size, swap_long, swap_short,
+                        spread_asia, spread_london, spread_ny
+                 from symbols where id = ?1",
+                q![sym],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?, r.get(8)?)),
+            )
+            .optional()
+            .unwrap_or(None);
+        if let Some((tick, pip, comision, contrato, swap_l, swap_s, asia, london, ny)) = fila {
+            cfg.tick_size = tick;
+            cfg.pip_size = pip;
+            cfg.commission_per_lot = comision;
+            cfg.contract_size = contrato;
+            cfg.swap_long = swap_l;
+            cfg.swap_short = swap_s;
+            cfg.spread_asia = asia;
+            cfg.spread_london = london;
+            cfg.spread_ny = ny;
+            // si no hay spreads por sesion, el spread guardado manda
+            if asia.is_none() && london.is_none() && ny.is_none() {
+                // se mantiene el spread de la configuracion guardada
+            }
+        }
+    }
+    cfg
+}
+
+/// Metadatos de mercado de un simbolo (los que el motor usa de verdad).
+#[tauri::command]
+pub fn get_symbol_meta(state: State<AppState>) -> Result<serde_json::Value, String> {
+    let db = state.db.lock();
+    let mut stmt = db
+        .prepare(
+            "select id, name, asset_class, tick_size, pip_size, commission, contract_size,
+                    swap_long, swap_short, spread_asia, spread_london, spread_ny
+             from symbols order by name")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, i64>(0)?,
+                "name": r.get::<_, String>(1)?,
+                "assetClass": r.get::<_, String>(2)?,
+                "tickSize": r.get::<_, f64>(3)?,
+                "pipSize": r.get::<_, f64>(4)?,
+                "commission": r.get::<_, f64>(5)?,
+                "contractSize": r.get::<_, f64>(6)?,
+                "swapLong": r.get::<_, f64>(7)?,
+                "swapShort": r.get::<_, f64>(8)?,
+                "spreadAsia": r.get::<_, Option<f64>>(9)?,
+                "spreadLondon": r.get::<_, Option<f64>>(10)?,
+                "spreadNy": r.get::<_, Option<f64>>(11)?,
+            }))
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(|e| e.to_string())?);
+    }
+    Ok(serde_json::json!({ "symbols": out }))
+}
+
+/// Actualiza los metadatos de mercado de un simbolo.
+///
+/// Es imprescindible poder editarlos: los swaps del broker cambian cada semana
+/// y el spread depende de la sesion y del momento.
+#[tauri::command]
+pub fn update_symbol_meta(
+    state: State<AppState>,
+    symbol_id: i64,
+    tick_size: Option<f64>,
+    pip_size: Option<f64>,
+    commission: Option<f64>,
+    contract_size: Option<f64>,
+    swap_long: Option<f64>,
+    swap_short: Option<f64>,
+    spread_asia: Option<f64>,
+    spread_london: Option<f64>,
+    spread_ny: Option<f64>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock();
+    db.execute(
+        "update symbols set
+            tick_size = coalesce(?2, tick_size),
+            pip_size = coalesce(?3, pip_size),
+            commission = coalesce(?4, commission),
+            contract_size = coalesce(?5, contract_size),
+            swap_long = coalesce(?6, swap_long),
+            swap_short = coalesce(?7, swap_short),
+            spread_asia = ?8,
+            spread_london = ?9,
+            spread_ny = ?10
+         where id = ?1",
+        q![symbol_id, tick_size, pip_size, commission, contract_size, swap_long, swap_short,
+           spread_asia, spread_london, spread_ny],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": true }))
 }
 
 #[tauri::command]
@@ -256,6 +427,13 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
 
     CANCEL_BUILD.store(false, Ordering::Relaxed);
 
+    // la build se mide con los parametros REALES del simbolo (pip, contrato,
+    // spread por sesion, swaps): antes se usaba el de por defecto para todos
+    let engine_cfg = {
+        let db = state.db.lock();
+        cfg_for_symbol_id(&db, config.symbol_id)
+    };
+
     let db = state.db.lock();
     db.execute(
         "insert into builds (kind, config, status, n_total, started_at) values ('builder', ?1, 'running', ?2, ?3)",
@@ -276,7 +454,6 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
                 return;
             }
         };
-        let engine_cfg = EngineCfg::default();
         let reporter = TauriReporter { app: app2.clone(), build_id };
 
         let results = genetic::build(&bars, &engine_cfg, &config, &reporter);
@@ -805,7 +982,7 @@ pub fn analyze_strategy_risk(
     state: State<AppState>,
     strategy_id: i64,
 ) -> Result<serde_json::Value, String> {
-    let (core, bars_path) = {
+    let (core, bars_path, cfg) = {
         let db = state.db.lock();
         let core = load_core(&db, strategy_id)?;
         let path: String = db
@@ -819,13 +996,14 @@ pub fn analyze_strategy_risk(
             .optional()
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
-        (core, path)
+        // la configuracion real del simbolo (pip, contrato, swap, spread por sesion)
+        let cfg = cfg_for_symbol(&db, strategy_id);
+        (core, path, cfg)
     };
     if bars_path.is_empty() {
         return Err("esta estrategia no tiene dataset cargado".into());
     }
     let bars = datastore::Qfn::read(std::path::Path::new(&bars_path)).map_err(|e| e.to_string())?;
-    let cfg = EngineCfg::default();
     ops::risk_profile(&bars, core.template, core.params, &cfg)
 }
 
@@ -947,11 +1125,12 @@ pub fn get_strategy_verdicts(state: State<AppState>, strategy_ids: Vec<i64>) -> 
 /// Calcula (y guarda) los cuatro veredictos de las estrategias pedidas.
 #[tauri::command(async)]
 pub fn compute_strategy_verdicts(state: State<AppState>, strategy_ids: Vec<i64>) -> Result<serde_json::Value, String> {
-    let cfg = EngineCfg::default();
     let mut guard = state.db.lock();
     let db = &mut *guard;
     let mut rows: Vec<serde_json::Value> = Vec::new();
     for id in strategy_ids {
+        // cada estrategia con la configuracion de SU simbolo
+        let cfg = cfg_for_symbol(db, id);
         let name: Option<String> = db
             .query_row("select name from strategies where id = ?1", q![id], |r| r.get(0))
             .optional()
@@ -1147,7 +1326,6 @@ pub fn run_retest(
     periodos: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     let db = state.db.lock();
-    let cfg = EngineCfg::default();
 
     // datos de cada mercado destino (si no hay dataset, se marca "sin datos")
     let mut mercados: Vec<(i64, String, Option<Vec<Bar>>)> = Vec::new();
@@ -1178,6 +1356,8 @@ pub fn run_retest(
     for id in strategy_ids {
         let orig = ops::stored_metrics(&db, id);
         let core = load_core(&db, id);
+        // cada estrategia se mide con la configuracion de SU simbolo
+        let cfg = cfg_for_symbol(&db, id);
 
         // 1) out-of-sample dentro de su propio mercado, en k periodos
         let k = periodos.unwrap_or(1).clamp(1, 12);
@@ -1710,10 +1890,14 @@ fn now_ms() -> i64 {
 
 #[tauri::command(async)]
 pub fn get_strategy_chart(state: State<AppState>, strategy_id: i64) -> Result<serde_json::Value, String> {
-    let db = state.db.lock();
-    let core = load_core(&db, strategy_id)?;
-    drop(db);
-    let out = crate::engine::backtest::run(&core.bars, core.template, core.params, &EngineCfg::default());
+    let (core, cfg) = {
+        let db = state.db.lock();
+        let core = load_core(&db, strategy_id)?;
+        // la configuracion real del simbolo (pip, contrato, swap, spread por sesion)
+        let cfg = cfg_for_symbol(&db, strategy_id);
+        (core, cfg)
+    };
+    let out = crate::engine::backtest::run(&core.bars, core.template, core.params, &cfg);
     // velas muestreadas (hasta 400) y trades mapeados al índice de vela muestreada
     let step = (core.bars.len() / 400).max(1);
     let sampled: Vec<&Bar> = core.bars.iter().step_by(step).collect();
@@ -1824,6 +2008,43 @@ pub fn run_opt_profile(state: State<AppState>, strategy_id: i64) -> Result<serde
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// La configuracion del motor sale de los metadatos del simbolo, no de los
+    /// valores por defecto (que son de Forex USD-quote).
+    #[test]
+    fn la_cfg_del_motor_toma_los_datos_del_simbolo() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::engine::datastore::init_schema(&conn).unwrap();
+        conn.execute(
+            "insert into symbols (name, asset_class, tick_size, pip_size, commission,
+                                  contract_size, swap_long, swap_short,
+                                  spread_asia, spread_london, spread_ny)
+             values ('USDJPY', 'forex', 0.001, 0.01, 3.5, 100000, 1.2, -0.8, 0.7, 1.0, 1.3)",
+            [],
+        )
+        .unwrap();
+        let sym = conn.last_insert_rowid();
+        conn.execute(
+            "insert into strategies (name, symbol_id, timeframe, origin, logic, params, status)
+             values ('S1', ?1, 'm1', 'builder', '{}', '{\"p\":[20,50,0]}', 'active')",
+            rusqlite::params![sym],
+        )
+        .unwrap();
+        let sid = conn.last_insert_rowid();
+
+        let cfg = cfg_for_symbol(&conn, sid);
+        assert_eq!(cfg.pip_size, 0.01, "el pip debe ser el del simbolo");
+        assert_eq!(cfg.tick_size, 0.001);
+        assert_eq!(cfg.commission_per_lot, 3.5);
+        assert_eq!(cfg.contract_size, 100_000.0);
+        assert_eq!(cfg.swap_long, 1.2);
+        assert_eq!(cfg.swap_short, -0.8);
+        assert_eq!(cfg.spread_asia, Some(0.7));
+        assert_eq!(cfg.spread_ny, Some(1.3));
+        // y el spread de esa sesion es el del simbolo, no el de por defecto
+        let medianoche = 1_699_920_000i64;
+        assert_eq!(cfg.spread_pips(medianoche + 9 * 3_600), 1.0);
+    }
 
     /// CSV de mercado en formato simple (time,open,high,low,close,volume).
     fn csv_de_ejemplo(n: usize) -> String {
