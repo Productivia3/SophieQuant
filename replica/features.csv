@@ -1,0 +1,60 @@
+feature,area,priority,original,clone,notes
+Descarga integrada de datos forex/CFD (Dukascopy source),data,should,yes,no,diferido por decision del propietario (uso personal); el import CSV propio ya funciona
+Descarga de datos de acciones (Yahoo Finance integrado),data,should,yes,no,diferido: sin feeds externos ni red en el producto
+Importar/exportar datasets (CSV / tick / m1 / EOD),data,must,yes,partial,import CSV real (engine::datastore::import_csv) con selector nativo y export CSV/QFD real; sin tick ni EOD nativos
+Gestion de datasets: resample / checks de calidad / conversion,data,should,yes,partial,"checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
+Motor de backtesting con precision de tick,backtester,must,yes,partial,"motor real sobre barras (m1) con spread, comision y sin lookahead (21 tests); no hay tick"
+Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes),backtester,must,yes,no,"V1 long-only de un simbolo; el retesteo cambia de simbolo, no los mezcla"
+Metricas estandar completas (Net/Sharpe/DD/PF/trades/Z/R2),backtester,must,yes,yes,"net, gross, PF, win rate, maxDD, RDD, Sharpe, Sortino, Z, R2, trades, avg trade y WFE (engine::metrics)"
+Graficos equity / MAE-MFE / capital diario,backtester,should,yes,partial,curva de equity real en S06 y equity de cartera; sin MAE/MFE ni curva de capital diario
+Deteccion automatica de problemas de estrategia,backtester,should,yes,yes,escaner en el Laboratorio (S24) con problemas detectados por estrategia y avisos por metrica
+Filtrado avanzado por cualquier metrica,filtering,must,yes,yes,"filtros por CUALQUIER metrica del motor (PF, Sharpe, Sortino, MaxDD, RDD, win rate, Z, R2, beneficio medio, n trades) con operador y valor; metricas y validacion vienen del motor (engine/robust.rs + comando list_build_metrics)"
+Generacion de estrategias por programacion genetica,builder,must,yes,yes,"genetic::build con mutacion, seleccion, pausa y determinismo por semilla; ademas ordena por score de robustez en vez de por beneficio"
+Generacion aleatoria clasica + evolucion,builder,must,yes,partial,evolucion real (mutacion + seleccion sobre poblacion); falta el modo aleatorio clasico por separado
+Plantillas de estrategia con placeholders aleatorios,builder,must,yes,partial,"3 plantillas con 3 parametros aleatorios (MaCross, RsiReversion, AtrBreakout); faltan plantillas por bloques"
+Estrategias multi-market y multi-TF,builder,should,yes,no,el generador trabaja con un simbolo y un timeframe
+Logica difusa (fuzzy) en estrategias generadas,builder,could,yes,no,el motor es binario; las variantes fuzzy solo aparecen en los datos de ejemplo
+Todos los indicadores estandar (RSI / MACD / CCI / ATR / .),blocks,must,yes,partial,"RSI, SMA, EMA, ATR, highest y lowest reales (engine::indicators); faltan MACD, CCI y patrones de velas"
+Formaciones de velas como bloques,blocks,should,yes,no,no hay detector de patrones de velas en el motor
+4 tipos de entradas y 6 tipos de salidas,blocks,must,yes,partial,3 plantillas con entrada y salida long-only; no hay la combinatoria 4x6 ni salidas escalonadas
+Bloques personalizados (snippets / extensibilidad),blocks,should,yes,no,el motor tiene plantillas cerradas; no hay snippets
+Bank of Strategies con persistencia de millones de backtests,databank,must,yes,partial,"persistencia real en SQLite (strategies, backtest_runs, exports); escala de decenas de miles, no millones"
+Retester: re-test de banks en diferente config,market/retest,must,yes,yes,S08 con seleccion multiple y comparacion original vs retest; motor Rust real (engine::ops::retest_one)
+Improver: mejorar una pieza de la estrategia,improver,should,yes,yes,S09 con variantes antes/despues y conservacion del original; motor Rust real (engine::ops::improver)
+Optimizador Simple,optimizer,should,yes,yes,S10 modo simple con grid de combinaciones; motor Rust real (engine::ops::run_grid)
+Optimizador Walk-Forward,optimizer,should,yes,yes,S10 modo WF con descuento out-of-sample (wfe_of); motor Rust real
+Graficos 3D de matriz de optimizacion,optimizer,could,yes,partial,S11 superficie isometrica SVG propia con el mejor grupo resaltado
+Simulaciones Monte Carlo (9+ tipo) con filtrado automatico,robustness,must,yes,yes,"S13 con 9 tests, veredictos y filtrado por 50% de supervivencia; motor Rust real (mc_suite, bootstrap determinista)"
+Walk-Forward Matrix (clustering de reoptimizaciones),robustness,must,yes,yes,S12 con heatmap de WFE y leyenda; motor Rust real (run_wfm)
+System Parameter Permutation (SPP),robustness,should,yes,yes,S14 con 6 permutaciones y barras de impacto; motor Rust real (engine::ops::spp)
+Optimization Profile (Rob Pardo),robustness,should,yes,yes,"S15 con curva net-param, zona estable sombreada y veredicto meseta/unimodal/puntual; motor Rust real (opt_profile)"
+Multiples periodos OOS con filtrado por periodo,robustness,should,yes,no,el WF actual es una sola pasada; no hay seleccion por periodo OOS
+Custom Projects: workflow multi-paso encadenado,workflows,must,yes,partial,"motor real run_project que encadena pasos (generar, Monte Carlo, guardar) y UI con reordenar y borrar; falta el canvas con drag&drop"
+Custom Analysis (conectar scripts externos Python),workflows,could,yes,no,no hay integracion con Python externo
+Portfolio Master: agrupar estrategias en cartera,portfolio,must,yes,yes,S18 con seleccion de estrategias y equity combinada; motor Rust real (mean_equity)
+Portfolio Composer con modelos de ponderacion,portfolio,should,yes,partial,solo equiponderado; sin modelos de ponderacion ni ajuste de una estrategia nueva a la cartera
+Analisis de correlacion entre estrategias,portfolio,must,yes,yes,"S18 matriz de calor con umbral 0.75; motor Rust real (corr_matrix, pearson)"
+Ajuste de nueva estrategia a cartera existente (no correlacionada),portfolio,could,yes,no,no hay busqueda de estrategias no correlacionadas para añadir
+Export codigo fuente a MetaTrader 4,export,must,yes,yes,"EA MQL4 real generado por export.rs: inputs con default, OnTick, logica de indicador y gestion de posicion"
+Export codigo fuente a MetaTrader 5 (hedge & netting),export,must,yes,yes,EA MQL5 real; el mismo EA sirve en cuentas hedge y netting (el modo lo fija la cuenta del broker)
+Export a NinjaTrader,export,should,yes,no,no implementado y NO se anuncia en la UI (decision del propietario: usa MetaTrader 5)
+Export a TradeStation (EasyLanguage),export,should,yes,no,no implementado y NO se anuncia en la UI
+Export a MultiCharts,export,should,yes,no,no implementado y NO se anuncia en la UI
+Export a JForex,export,should,yes,no,no implementado y NO se anuncia en la UI
+Editor de estrategia integrado sin codigo,editor,should,yes,yes,"S07 edita las tres reglas que el motor ejecuta (cruce de medias, reversion RSI, ruptura ATR); guardar persiste la regla y RECALCULA la corrida sobre el dataset (metricas, equity y corte OOS). Comando real save_strategy_logic + tests de integracion en Rust"
+Editor visual AlgoWizard (bloques drag&drop),editor,could,yes,skip,excluido por decision del propietario (uso personal)
+Ver trades en el chart con indicadores,chart,should,yes,partial,"S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
+ATM - Advanced Trade Management (multiples salidas escaladas),portfolio,could,yes,no,excluido por decision del propietario; es la funcion premium del original
+Laboratorio: dashboard de analisis profundo,analyzer,should,yes,yes,"S24 con resumen del banco, tabla, metricas y pestanas; motor Rust real (engine::ops)"
+Laboratorio: Monte Carlo de cartera,analyzer,could,yes,yes,S24 pestana MC de cartera con percentiles de equity final y probabilidad de rotura; motor Rust real
+Laboratorio: Money Management sim,analyzer,could,yes,partial,"S24 pestana MMC con riesgo por operacion y DD esperado; orientativa, no usa el motor Rust"
+Gestor de datos: suite de gestion de datos,data,should,yes,yes,"S21 con selector NATIVO de ficheros (tauri-plugin-dialog), simbolo y temporalidad de destino, import real via import_data_csv (limpia el CSV, guarda QFN y registra en data_files) y export csv/qfd; 2 tests de integracion con CSV real"
+Creditos IA / chat Q,ai,could,yes,skip,excluido por decision del propietario
+Market & Volume Profile,charts,could,yes,skip,excluido por decision del propietario
+SQ for Business / MQL Market publicacion,marketplace,could,yes,skip,"red de terceros, irreducible: uso personal, sin publicacion"
+Paquete educacion (e-book + curso + estrategias),education,could,yes,skip,"contenido intelectual del original, irreducible"
+Licencias por tiers (Starter/Pro/Ultimate) con gating de features,licensing,could,yes,no,"uso personal: sin licencias, sin tiers y sin gating"
+Works on Windows/Mac/Linux,platform,must,yes,partial,app Tauri multiplataforma (codigo y config); binarios compilados y probados solo en Windows
+Tarjeta de veredictos consolidados por estrategia (walk-forward / Monte Carlo / SPP / perfil),robustness,could,no,yes,"PROPIO: las cuatro pruebas en un sitio, con umbrales visibles y resultado persistido (engine/verdicts.rs + tabla strategy_verdicts)"
+Marca de la zona out-of-sample en la curva de equity y en el grafico de velas,chart,could,no,yes,"PROPIO: el corte es el mismo que usa la comprobacion walk-forward, calculado en el motor y guardado con la corrida (oos_frac)"
+"Seleccion por robustez avanzada (score 0-100 con WFE, Monte Carlo, SPP y perfil)",builder,could,no,yes,"PROPIO: el generador ordena por un score explicable (35 % walk-forward, 30 % supervivencia MC, 20 % SPP, 15 % perfil) en vez de por beneficio; el build avisa de que filtro esta bloqueando"

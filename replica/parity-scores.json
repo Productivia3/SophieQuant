@@ -1,0 +1,732 @@
+{
+  "all": {
+    "feature_score": 59.2,
+    "counted": 51,
+    "must_have_done": 10,
+    "must_have_total": 20,
+    "by_area": [
+      {
+        "area": "licensing",
+        "score": 0.0,
+        "features": 1
+      },
+      {
+        "area": "blocks",
+        "score": 30.0,
+        "features": 4
+      },
+      {
+        "area": "workflows",
+        "score": 37.5,
+        "features": 2
+      },
+      {
+        "area": "data",
+        "score": 40.9,
+        "features": 5
+      },
+      {
+        "area": "export",
+        "score": 42.9,
+        "features": 6
+      },
+      {
+        "area": "builder",
+        "score": 50.0,
+        "features": 5
+      },
+      {
+        "area": "databank",
+        "score": 50.0,
+        "features": 1
+      },
+      {
+        "area": "chart",
+        "score": 50.0,
+        "features": 1
+      },
+      {
+        "area": "platform",
+        "score": 50.0,
+        "features": 1
+      },
+      {
+        "area": "backtester",
+        "score": 57.7,
+        "features": 5
+      },
+      {
+        "area": "portfolio",
+        "score": 70.0,
+        "features": 5
+      },
+      {
+        "area": "robustness",
+        "score": 83.3,
+        "features": 5
+      },
+      {
+        "area": "analyzer",
+        "score": 87.5,
+        "features": 3
+      },
+      {
+        "area": "optimizer",
+        "score": 90.0,
+        "features": 3
+      },
+      {
+        "area": "filtering",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "market/retest",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "improver",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "editor",
+        "score": 100.0,
+        "features": 1
+      }
+    ],
+    "missing": [
+      {
+        "feature": "Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes)",
+        "area": "backtester",
+        "priority": "must",
+        "clone": "no",
+        "notes": "V1 long-only de un simbolo; el retesteo cambia de simbolo, no los mezcla"
+      },
+      {
+        "feature": "Motor de backtesting con precision de tick",
+        "area": "backtester",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "motor real sobre barras (m1) con spread, comision y sin lookahead (21 tests); no hay tick"
+      },
+      {
+        "feature": "4 tipos de entradas y 6 tipos de salidas",
+        "area": "blocks",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "3 plantillas con entrada y salida long-only; no hay la combinatoria 4x6 ni salidas escalonadas"
+      },
+      {
+        "feature": "Todos los indicadores estandar (RSI / MACD / CCI / ATR / .)",
+        "area": "blocks",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "RSI, SMA, EMA, ATR, highest y lowest reales (engine::indicators); faltan MACD, CCI y patrones de velas"
+      },
+      {
+        "feature": "Generacion aleatoria clasica + evolucion",
+        "area": "builder",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "evolucion real (mutacion + seleccion sobre poblacion); falta el modo aleatorio clasico por separado"
+      },
+      {
+        "feature": "Plantillas de estrategia con placeholders aleatorios",
+        "area": "builder",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "3 plantillas con 3 parametros aleatorios (MaCross, RsiReversion, AtrBreakout); faltan plantillas por bloques"
+      },
+      {
+        "feature": "Importar/exportar datasets (CSV / tick / m1 / EOD)",
+        "area": "data",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "import CSV real (engine::datastore::import_csv) con selector nativo y export CSV/QFD real; sin tick ni EOD nativos"
+      },
+      {
+        "feature": "Bank of Strategies con persistencia de millones de backtests",
+        "area": "databank",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "persistencia real en SQLite (strategies, backtest_runs, exports); escala de decenas de miles, no millones"
+      },
+      {
+        "feature": "Works on Windows/Mac/Linux",
+        "area": "platform",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "app Tauri multiplataforma (codigo y config); binarios compilados y probados solo en Windows"
+      },
+      {
+        "feature": "Custom Projects: workflow multi-paso encadenado",
+        "area": "workflows",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "motor real run_project que encadena pasos (generar, Monte Carlo, guardar) y UI con reordenar y borrar; falta el canvas con drag&drop"
+      },
+      {
+        "feature": "Bloques personalizados (snippets / extensibilidad)",
+        "area": "blocks",
+        "priority": "should",
+        "clone": "no",
+        "notes": "el motor tiene plantillas cerradas; no hay snippets"
+      },
+      {
+        "feature": "Formaciones de velas como bloques",
+        "area": "blocks",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no hay detector de patrones de velas en el motor"
+      },
+      {
+        "feature": "Estrategias multi-market y multi-TF",
+        "area": "builder",
+        "priority": "should",
+        "clone": "no",
+        "notes": "el generador trabaja con un simbolo y un timeframe"
+      },
+      {
+        "feature": "Descarga de datos de acciones (Yahoo Finance integrado)",
+        "area": "data",
+        "priority": "should",
+        "clone": "no",
+        "notes": "diferido: sin feeds externos ni red en el producto"
+      },
+      {
+        "feature": "Descarga integrada de datos forex/CFD (Dukascopy source)",
+        "area": "data",
+        "priority": "should",
+        "clone": "no",
+        "notes": "diferido por decision del propietario (uso personal); el import CSV propio ya funciona"
+      },
+      {
+        "feature": "Export a JForex",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI"
+      },
+      {
+        "feature": "Export a MultiCharts",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI"
+      },
+      {
+        "feature": "Export a NinjaTrader",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI (decision del propietario: usa MetaTrader 5)"
+      },
+      {
+        "feature": "Export a TradeStation (EasyLanguage)",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI"
+      },
+      {
+        "feature": "Multiples periodos OOS con filtrado por periodo",
+        "area": "robustness",
+        "priority": "should",
+        "clone": "no",
+        "notes": "el WF actual es una sola pasada; no hay seleccion por periodo OOS"
+      },
+      {
+        "feature": "Graficos equity / MAE-MFE / capital diario",
+        "area": "backtester",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "curva de equity real en S06 y equity de cartera; sin MAE/MFE ni curva de capital diario"
+      },
+      {
+        "feature": "Ver trades en el chart con indicadores",
+        "area": "chart",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
+      },
+      {
+        "feature": "Gestion de datasets: resample / checks de calidad / conversion",
+        "area": "data",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
+      },
+      {
+        "feature": "Portfolio Composer con modelos de ponderacion",
+        "area": "portfolio",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "solo equiponderado; sin modelos de ponderacion ni ajuste de una estrategia nueva a la cartera"
+      },
+      {
+        "feature": "Logica difusa (fuzzy) en estrategias generadas",
+        "area": "builder",
+        "priority": "could",
+        "clone": "no",
+        "notes": "el motor es binario; las variantes fuzzy solo aparecen en los datos de ejemplo"
+      },
+      {
+        "feature": "Licencias por tiers (Starter/Pro/Ultimate) con gating de features",
+        "area": "licensing",
+        "priority": "could",
+        "clone": "no",
+        "notes": "uso personal: sin licencias, sin tiers y sin gating"
+      },
+      {
+        "feature": "ATM - Advanced Trade Management (multiples salidas escaladas)",
+        "area": "portfolio",
+        "priority": "could",
+        "clone": "no",
+        "notes": "excluido por decision del propietario; es la funcion premium del original"
+      },
+      {
+        "feature": "Ajuste de nueva estrategia a cartera existente (no correlacionada)",
+        "area": "portfolio",
+        "priority": "could",
+        "clone": "no",
+        "notes": "no hay busqueda de estrategias no correlacionadas para añadir"
+      },
+      {
+        "feature": "Custom Analysis (conectar scripts externos Python)",
+        "area": "workflows",
+        "priority": "could",
+        "clone": "no",
+        "notes": "no hay integracion con Python externo"
+      },
+      {
+        "feature": "Laboratorio: Money Management sim",
+        "area": "analyzer",
+        "priority": "could",
+        "clone": "partial",
+        "notes": "S24 pestana MMC con riesgo por operacion y DD esperado; orientativa, no usa el motor Rust"
+      },
+      {
+        "feature": "Graficos 3D de matriz de optimizacion",
+        "area": "optimizer",
+        "priority": "could",
+        "clone": "partial",
+        "notes": "S11 superficie isometrica SVG propia con el mejor grupo resaltado"
+      }
+    ],
+    "skipped": [
+      {
+        "feature": "Editor visual AlgoWizard (bloques drag&drop)",
+        "area": "editor",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "excluido por decision del propietario (uso personal)"
+      },
+      {
+        "feature": "Creditos IA / chat Q",
+        "area": "ai",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "excluido por decision del propietario"
+      },
+      {
+        "feature": "Market & Volume Profile",
+        "area": "charts",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "excluido por decision del propietario"
+      },
+      {
+        "feature": "SQ for Business / MQL Market publicacion",
+        "area": "marketplace",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "red de terceros, irreducible: uso personal, sin publicacion"
+      },
+      {
+        "feature": "Paquete educacion (e-book + curso + estrategias)",
+        "area": "education",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "contenido intelectual del original, irreducible"
+      }
+    ],
+    "extras": [
+      {
+        "feature": "Tarjeta de veredictos consolidados por estrategia (walk-forward / Monte Carlo / SPP / perfil)",
+        "area": "robustness",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: las cuatro pruebas en un sitio, con umbrales visibles y resultado persistido (engine/verdicts.rs + tabla strategy_verdicts)"
+      },
+      {
+        "feature": "Marca de la zona out-of-sample en la curva de equity y en el grafico de velas",
+        "area": "chart",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: el corte es el mismo que usa la comprobacion walk-forward, calculado en el motor y guardado con la corrida (oos_frac)"
+      },
+      {
+        "feature": "Seleccion por robustez avanzada (score 0-100 con WFE, Monte Carlo, SPP y perfil)",
+        "area": "builder",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: el generador ordena por un score explicable (35 % walk-forward, 30 % supervivencia MC, 20 % SPP, 15 % perfil) en vez de por beneficio; el build avisa de que filtro esta bloqueando"
+      }
+    ],
+    "problems": []
+  },
+  "inscope": {
+    "feature_score": 61.9,
+    "counted": 48,
+    "must_have_done": 10,
+    "must_have_total": 20,
+    "by_area": [
+      {
+        "area": "blocks",
+        "score": 30.0,
+        "features": 4
+      },
+      {
+        "area": "workflows",
+        "score": 37.5,
+        "features": 2
+      },
+      {
+        "area": "export",
+        "score": 42.9,
+        "features": 6
+      },
+      {
+        "area": "builder",
+        "score": 50.0,
+        "features": 5
+      },
+      {
+        "area": "databank",
+        "score": 50.0,
+        "features": 1
+      },
+      {
+        "area": "chart",
+        "score": 50.0,
+        "features": 1
+      },
+      {
+        "area": "platform",
+        "score": 50.0,
+        "features": 1
+      },
+      {
+        "area": "backtester",
+        "score": 57.7,
+        "features": 5
+      },
+      {
+        "area": "data",
+        "score": 64.3,
+        "features": 3
+      },
+      {
+        "area": "portfolio",
+        "score": 70.0,
+        "features": 5
+      },
+      {
+        "area": "robustness",
+        "score": 83.3,
+        "features": 5
+      },
+      {
+        "area": "analyzer",
+        "score": 87.5,
+        "features": 3
+      },
+      {
+        "area": "optimizer",
+        "score": 90.0,
+        "features": 3
+      },
+      {
+        "area": "filtering",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "market/retest",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "improver",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "editor",
+        "score": 100.0,
+        "features": 1
+      }
+    ],
+    "missing": [
+      {
+        "feature": "Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes)",
+        "area": "backtester",
+        "priority": "must",
+        "clone": "no",
+        "notes": "V1 long-only de un simbolo; el retesteo cambia de simbolo, no los mezcla"
+      },
+      {
+        "feature": "Motor de backtesting con precision de tick",
+        "area": "backtester",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "motor real sobre barras (m1) con spread, comision y sin lookahead (21 tests); no hay tick"
+      },
+      {
+        "feature": "4 tipos de entradas y 6 tipos de salidas",
+        "area": "blocks",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "3 plantillas con entrada y salida long-only; no hay la combinatoria 4x6 ni salidas escalonadas"
+      },
+      {
+        "feature": "Todos los indicadores estandar (RSI / MACD / CCI / ATR / .)",
+        "area": "blocks",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "RSI, SMA, EMA, ATR, highest y lowest reales (engine::indicators); faltan MACD, CCI y patrones de velas"
+      },
+      {
+        "feature": "Generacion aleatoria clasica + evolucion",
+        "area": "builder",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "evolucion real (mutacion + seleccion sobre poblacion); falta el modo aleatorio clasico por separado"
+      },
+      {
+        "feature": "Plantillas de estrategia con placeholders aleatorios",
+        "area": "builder",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "3 plantillas con 3 parametros aleatorios (MaCross, RsiReversion, AtrBreakout); faltan plantillas por bloques"
+      },
+      {
+        "feature": "Importar/exportar datasets (CSV / tick / m1 / EOD)",
+        "area": "data",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "import CSV real (engine::datastore::import_csv) con selector nativo y export CSV/QFD real; sin tick ni EOD nativos"
+      },
+      {
+        "feature": "Bank of Strategies con persistencia de millones de backtests",
+        "area": "databank",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "persistencia real en SQLite (strategies, backtest_runs, exports); escala de decenas de miles, no millones"
+      },
+      {
+        "feature": "Works on Windows/Mac/Linux",
+        "area": "platform",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "app Tauri multiplataforma (codigo y config); binarios compilados y probados solo en Windows"
+      },
+      {
+        "feature": "Custom Projects: workflow multi-paso encadenado",
+        "area": "workflows",
+        "priority": "must",
+        "clone": "partial",
+        "notes": "motor real run_project que encadena pasos (generar, Monte Carlo, guardar) y UI con reordenar y borrar; falta el canvas con drag&drop"
+      },
+      {
+        "feature": "Bloques personalizados (snippets / extensibilidad)",
+        "area": "blocks",
+        "priority": "should",
+        "clone": "no",
+        "notes": "el motor tiene plantillas cerradas; no hay snippets"
+      },
+      {
+        "feature": "Formaciones de velas como bloques",
+        "area": "blocks",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no hay detector de patrones de velas en el motor"
+      },
+      {
+        "feature": "Estrategias multi-market y multi-TF",
+        "area": "builder",
+        "priority": "should",
+        "clone": "no",
+        "notes": "el generador trabaja con un simbolo y un timeframe"
+      },
+      {
+        "feature": "Export a JForex",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI"
+      },
+      {
+        "feature": "Export a MultiCharts",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI"
+      },
+      {
+        "feature": "Export a NinjaTrader",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI (decision del propietario: usa MetaTrader 5)"
+      },
+      {
+        "feature": "Export a TradeStation (EasyLanguage)",
+        "area": "export",
+        "priority": "should",
+        "clone": "no",
+        "notes": "no implementado y NO se anuncia en la UI"
+      },
+      {
+        "feature": "Multiples periodos OOS con filtrado por periodo",
+        "area": "robustness",
+        "priority": "should",
+        "clone": "no",
+        "notes": "el WF actual es una sola pasada; no hay seleccion por periodo OOS"
+      },
+      {
+        "feature": "Graficos equity / MAE-MFE / capital diario",
+        "area": "backtester",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "curva de equity real en S06 y equity de cartera; sin MAE/MFE ni curva de capital diario"
+      },
+      {
+        "feature": "Ver trades en el chart con indicadores",
+        "area": "chart",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
+      },
+      {
+        "feature": "Gestion de datasets: resample / checks de calidad / conversion",
+        "area": "data",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
+      },
+      {
+        "feature": "Portfolio Composer con modelos de ponderacion",
+        "area": "portfolio",
+        "priority": "should",
+        "clone": "partial",
+        "notes": "solo equiponderado; sin modelos de ponderacion ni ajuste de una estrategia nueva a la cartera"
+      },
+      {
+        "feature": "Logica difusa (fuzzy) en estrategias generadas",
+        "area": "builder",
+        "priority": "could",
+        "clone": "no",
+        "notes": "el motor es binario; las variantes fuzzy solo aparecen en los datos de ejemplo"
+      },
+      {
+        "feature": "ATM - Advanced Trade Management (multiples salidas escaladas)",
+        "area": "portfolio",
+        "priority": "could",
+        "clone": "no",
+        "notes": "excluido por decision del propietario; es la funcion premium del original"
+      },
+      {
+        "feature": "Ajuste de nueva estrategia a cartera existente (no correlacionada)",
+        "area": "portfolio",
+        "priority": "could",
+        "clone": "no",
+        "notes": "no hay busqueda de estrategias no correlacionadas para añadir"
+      },
+      {
+        "feature": "Custom Analysis (conectar scripts externos Python)",
+        "area": "workflows",
+        "priority": "could",
+        "clone": "no",
+        "notes": "no hay integracion con Python externo"
+      },
+      {
+        "feature": "Laboratorio: Money Management sim",
+        "area": "analyzer",
+        "priority": "could",
+        "clone": "partial",
+        "notes": "S24 pestana MMC con riesgo por operacion y DD esperado; orientativa, no usa el motor Rust"
+      },
+      {
+        "feature": "Graficos 3D de matriz de optimizacion",
+        "area": "optimizer",
+        "priority": "could",
+        "clone": "partial",
+        "notes": "S11 superficie isometrica SVG propia con el mejor grupo resaltado"
+      }
+    ],
+    "skipped": [
+      {
+        "feature": "Editor visual AlgoWizard (bloques drag&drop)",
+        "area": "editor",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "excluido por decision del propietario (uso personal)"
+      },
+      {
+        "feature": "Creditos IA / chat Q",
+        "area": "ai",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "excluido por decision del propietario"
+      },
+      {
+        "feature": "Market & Volume Profile",
+        "area": "charts",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "excluido por decision del propietario"
+      },
+      {
+        "feature": "SQ for Business / MQL Market publicacion",
+        "area": "marketplace",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "red de terceros, irreducible: uso personal, sin publicacion"
+      },
+      {
+        "feature": "Paquete educacion (e-book + curso + estrategias)",
+        "area": "education",
+        "priority": "could",
+        "clone": "skip",
+        "notes": "contenido intelectual del original, irreducible"
+      }
+    ],
+    "extras": [
+      {
+        "feature": "Tarjeta de veredictos consolidados por estrategia (walk-forward / Monte Carlo / SPP / perfil)",
+        "area": "robustness",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: las cuatro pruebas en un sitio, con umbrales visibles y resultado persistido (engine/verdicts.rs + tabla strategy_verdicts)"
+      },
+      {
+        "feature": "Marca de la zona out-of-sample en la curva de equity y en el grafico de velas",
+        "area": "chart",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: el corte es el mismo que usa la comprobacion walk-forward, calculado en el motor y guardado con la corrida (oos_frac)"
+      },
+      {
+        "feature": "Seleccion por robustez avanzada (score 0-100 con WFE, Monte Carlo, SPP y perfil)",
+        "area": "builder",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: el generador ordena por un score explicable (35 % walk-forward, 30 % supervivencia MC, 20 % SPP, 15 % perfil) en vez de por beneficio; el build avisa de que filtro esta bloqueando"
+      }
+    ],
+    "problems": []
+  }
+}

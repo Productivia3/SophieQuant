@@ -1,0 +1,41 @@
+{
+  "mode": "layout",
+  "original": {
+    "width": 1436,
+    "height": 1030
+  },
+  "clone": {
+    "width": 1440,
+    "height": 900
+  },
+  "compared_at": {
+    "width": 480,
+    "height": 300
+  },
+  "height_delta_pct": -12.8,
+  "score": 17.8,
+  "verdict": "different",
+  "regions": [
+    {
+      "x": 0,
+      "y": 0,
+      "w": 1436,
+      "h": 957,
+      "cells": 67,
+      "where": "middle centre"
+    },
+    {
+      "x": 1316,
+      "y": 0,
+      "w": 119,
+      "h": 119,
+      "cells": 1,
+      "where": "top right"
+    }
+  ],
+  "files": {
+    "original": "replica/screens/ORIGINAL-S08-retester.png",
+    "clone": "replica/clone-screens/S08-retesteo.png"
+  },
+  "diff_image": "replica/diffs/S08.png"
+}

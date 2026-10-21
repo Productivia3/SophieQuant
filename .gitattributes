@@ -1,0 +1,16 @@
+# Normalizacion de finales de linea: en el repo LF, en Windows el checkout
+# los convierte a CRLF. Evita que cada fichero aparezca como modificado.
+* text=auto eol=lf
+
+# Binarios que no deben tocarse
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.qfn binary
+*.db binary
+
+# Ficheros de lock: se versionan (reproducibilidad)
+package-lock.json -diff
+src-tauri/Cargo.lock -diff

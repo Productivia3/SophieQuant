@@ -1,0 +1,22 @@
+@import './styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bg text-text font-sans text-base antialiased;
+    overflow: hidden; /* app de escritorio: scroll dentro de paneles, no en body */
+  }
+  ::selection { background: color-mix(in srgb, var(--color-accent) 35%, transparent); }
+}
+
+@layer utilities {
+  /* scrollbars del tema oscuro */
+  .qf-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+  .qf-scroll::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: var(--radius-sm); }
+  .qf-scroll::-webkit-scrollbar-thumb:hover { background: var(--color-border-input); }
+  .qf-scroll::-webkit-scrollbar-track { background: transparent; }
+}

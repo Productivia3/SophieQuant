@@ -1,0 +1,37 @@
+# Registro de riesgos aceptados para cargo-audit (SophieQuant).
+#
+# cargo-audit 0.22 no lee este fichero automaticamente: los ignore se pasan por
+# linea de comandos. El comando de referencia del proyecto es:
+#
+#   cargo audit --deny warnings --ignore RUSTSEC-2024-0429 --ignore RUSTSEC-2024-0370
+#
+# Ejecutado desde src-tauri/ (donde vive el Cargo.lock). Resultado: exit 0.
+#
+# Contexto: SophieQuant es una aplicacion de escritorio para uso personal, que
+# se entrega compilada para Windows. Las dos advertencias aceptadas abajo
+# provienen UNICAMENTE del stack GTK/Linux de Tauri (el backend de Linux), que
+# en la compilacion de Windows ni siquiera se compila.
+#
+# Resultado del analisis (2026-10-21, 437 dependencias escaneadas):
+#   0 vulnerabilidades
+#   2 avisos informativos, ambos solo aplicables a una build de Linux:
+#     - RUSTSEC-2024-0429  glib 0.18.5  unsound (VariantStrIter)
+#       Solo se compila en Linux (gtk, gdk, cairo-rs, webkit2gtk, soup3...).
+#       La version corregida (>=0.20.0) es incompatible con el stack GTK que
+#       fija Tauri 2.12 ("failed to select a version for the requirement
+#       glib = ^0.18"), asi que no se puede subir sin romper el arbol de
+#       dependencias. Verificado: cargo update -p glib --precise 0.20.0 falla.
+#       No affecta a la entrega de Windows, que es la que se usa.
+#     - RUSTSEC-2024-0370  proc-macro-error 1.0.4  unmaintained
+#       Crate de macros en tiempo de compilacion, sin vulnerabilidad. Llega
+#       unicamente por glib-macros y gtk3-macros (otra vez, solo Linux). El
+#       crate esta archivado y no tiene version corregida: la alternativa
+#       seria que gtk-rs-macros lo eliminase.
+#
+# Si alguna vez se compila para Linux, hay que revisar estas dos entradas.
+
+[advisories]
+ignore = [
+    "RUSTSEC-2024-0429", # glib: solo Linux; sin version corregida compatible
+    "RUSTSEC-2024-0370", # proc-macro-error: sin vulnerabilidad, solo Linux, sin arreglo
+]

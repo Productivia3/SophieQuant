@@ -1,0 +1,65 @@
+{
+  "name": "SophieQuant",
+  "tagline": "Estrategias que sobreviven a la evidencia",
+  "avoid": [
+    "StrategyQuant",
+    "Strategy Quant",
+    "StrategyQuantX",
+    "SQX",
+    "QuantAnalyzer",
+    "QuantDataManager",
+    "AlgoCloud",
+    "QuantForge",
+    "Walkproof",
+    "StratProof",
+    "Criterio"
+  ],
+  "domains": [
+    "strategyquant.com",
+    "algocloud.com",
+    "quantforge.com",
+    "walkproof.com",
+    "stratproof.com",
+    "criterio.trade"
+  ],
+  "colors": [
+    "#fe8f3a",
+    "#fe9d23",
+    "#52b2ff",
+    "#298bd9",
+    "#404048",
+    "#2d2d34",
+    "#ff5268",
+    "#54b946",
+    "#07c00d"
+  ],
+  "palette": {
+    "bg": "#0d0b14",
+    "surface": "#141220",
+    "surface-raised": "#1b1828",
+    "border": "#2a2540",
+    "border-input": "#6b6388",
+    "text": "#ece9f7",
+    "text-muted": "#a29bb8",
+    "accent": "#9d7bff",
+    "on-accent": "#14101f",
+    "danger": "#ef4a52",
+    "success": "#2fbf87",
+    "warning": "#f0c04a"
+  },
+  "voice": {
+    "three_words": ["preciso", "honesto", "terreno"],
+    "means": {
+      "preciso": "nombra el dato, la métrica y su incertidumbre; no alarga ni suaviza",
+      "honesto": "dice lo que el test ha mostrado, incluso cuando el resultado es mediocre; no promete rentabilidad",
+      "terreno": "habla como un colega que trabaja con esto a diario; ni técnico-oscuro ni publicitario"
+    },
+    "donts": [
+      "sin promesas de rentabilidad ni de resultados garantizados",
+      "sin telemetria: el producto dice siempre que los datos no salen del equipo",
+      "sin jerga de marketing (revolucionario, brutal, potencial ilimitado)",
+      "sin miedo al dato negativo: una estrategia que no pasa las pruebas se dice que no pasa",
+      "sin imitar el tono del original: frases nuevas, no paráfrasis de su copy"
+    ]
+  }
+}

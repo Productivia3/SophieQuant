@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────
+# SophieQuant — ficheros que NO se suben al repositorio
+#
+# Motivos:
+#   1. Ruido de compilacion: se regenera con `npm install` + `cargo build`.
+#   2. Material de terceros: volcados literales de reseñas ajenas y capturas
+#      de marketing del producto de referencia. Se quedan en el disco local
+#      (ver README, seccion "Lo que no se sube y por que").
+#   3. Datos locales: la base de datos y los datasets del usuario nunca salen
+#      de su equipo (es el principio del producto).
+# ─────────────────────────────────────────────────────────────────────────
+.claude/
+
+# ── Node / Vite / TypeScript ───────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Rust / Tauri ──────────────────────────────────────────────────────
+src-tauri/target/
+src-tauri/gen/schemas/
+*.rlib
+*.rmeta
+
+# ── Tests ─────────────────────────────────────────────────────────────
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+coverage/
+
+# ── Datos locales del usuario (nunca se suben) ────────────────────────
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.qfn
+*.qfd
+data/
+datasets/
+
+# ── Secretos y configuracion local ────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.local
+secrets.toml
+
+# ── Editores y SO ─────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Material de terceros (ver README) ─────────────────────────────────
+# volcados literales de reseñas (Reddit / Trustpilot / StatOasis)
+replica/entrepreneur/raw-*.txt
+replica/entrepreneur/reviews.csv
+# capturas de marketing del producto de referencia
+replica/screens/ORIGINAL-*.png
+# informe de tests generado
+replica/e2e-report/
