@@ -523,6 +523,9 @@ export function S05Strategy() {
   const [script, setScript] = useState<string | null>(null)
   const [analisis, setAnalisis] = useState<{ veredicto: string; etiqueta: string; metricas: Record<string, number>; notas: string } | null>(null)
   const [historial, setHistorial] = useState<Array<{ id: number; script: string; verdict: string; label: string; createdAt: number }>>([])
+  const [riesgo, setRiesgo] = useState<Awaited<ReturnType<typeof api.analyzeStrategyRisk>> | null>(null)
+  const [riesgoMsg, setRiesgoMsg] = useState<string | null>(null)
+  const [riesgoBusy, setRiesgoBusy] = useState(false)
   const [caMsg, setCaMsg] = useState<string | null>(null)
   const [caBusy, setCaBusy] = useState(false)
   useEffect(() => { api.getStrategy(+id!).then(setS) }, [id])
@@ -530,6 +533,19 @@ export function S05Strategy() {
     api.listCustomAnalyses(+id!).then(setHistorial).catch(() => setHistorial([]))
   }, [id])
   const m = s?.lastRun?.metrics
+
+  async function analizarRiesgo() {
+    if (!s) return
+    setRiesgoBusy(true); setRiesgoMsg(null)
+    try {
+      const r = await api.analyzeStrategyRisk(s.id)
+      setRiesgo(r)
+    } catch (e) {
+      setRiesgoMsg(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRiesgoBusy(false)
+    }
+  }
 
   async function elegirScript() {
     const ruta = await api.pickFile(['py'])
@@ -594,6 +610,40 @@ export function S05Strategy() {
           </div>
 
           <VerdictCard strategyIds={[s.id]} title="Veredictos de robustez de esta estrategia" />
+
+          <section className="rounded-md border border-border bg-surface p-3">
+            <div className="mb-2 flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-muted">Riesgo real (MAE / MFE y capital diario)</h2>
+              <Button variant="secondary" size="sm" loading={riesgoBusy} className="ml-auto"
+                onClick={() => void analizarRiesgo()}>
+                Calcular perfil de riesgo
+              </Button>
+            </div>
+            <p className="mb-2 text-xs text-muted">
+              MAE es lo peor que se puso la posicion; MFE, lo mejor que llego a tomar. Si el MFE es
+              alto y el resultado final mediocre, la salida se esta comiendo el recorrido.
+            </p>
+            {riesgoMsg && <p className="text-xs text-muted" role="status">{riesgoMsg}</p>}
+            {riesgo && (
+              <>
+                <div className="mb-2 flex flex-wrap gap-3 text-xs text-muted">
+                  <span>MAE medio <b className="text-text">{fmtNum(riesgo.maePct, 2)} %</b></span>
+                  <span>MFE medio <b className="text-text">{fmtNum(riesgo.mfePct, 2)} %</b></span>
+                  <span>peor MAE <b className="text-text">{fmtNum(riesgo.peorMaePct, 2)} %</b></span>
+                  <span>mejor MFE <b className="text-text">{fmtNum(riesgo.mejorMfePct, 2)} %</b></span>
+                  <span>expectativa <b className="text-text">{fmtMoney(riesgo.expectativa)}</b>
+                    {' '}({fmtNum(riesgo.expectativaPct, 2)} %)</span>
+                </div>
+                <div className="rounded-md border border-border bg-surface p-2">
+                  <p className="mb-1 text-xs font-semibold text-muted">Capital diario</p>
+                  <EquityChart
+                    series={riesgo.capitalDiario.map(p => p.v)}
+                    label="Curva de capital diario"
+                    height={180} />
+                </div>
+              </>
+            )}
+          </section>
 
           <HistoryPanel strategyId={s.id} title="Historial de analisis de esta estrategia" />
 

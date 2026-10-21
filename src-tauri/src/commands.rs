@@ -768,6 +768,67 @@ pub fn export_strategy_csv(
     Ok(out.to_string_lossy().to_string())
 }
 
+/// Sugiere que estrategias meter en la cartera, con el motivo de cada descarte.
+#[tauri::command]
+pub fn suggest_portfolio(
+    state: State<AppState>,
+    candidate_ids: Vec<i64>,
+    max_correlation: Option<f64>,
+    max_members: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock();
+    let mut ids: Vec<i64> = Vec::new();
+    let mut nombres: Vec<(i64, String)> = Vec::new();
+    let mut seqs: Vec<Vec<f64>> = Vec::new();
+    let mut metricas: Vec<Option<crate::engine::types::Metrics>> = Vec::new();
+    for id in &candidate_ids {
+        let nombre: String = db
+            .query_row("select name from strategies where id = ?1", q![*id], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| format!("#{id}"));
+        if let Some(eq) = ops::stored_equity(&db, *id) {
+            ids.push(*id);
+            nombres.push((*id, nombre));
+            seqs.push(eq);
+            metricas.push(ops::stored_metrics(&db, *id));
+        }
+    }
+    let max_corr = max_correlation.unwrap_or(0.7).clamp(0.0, 1.0);
+    let max_mem = max_members.unwrap_or(8).clamp(2, 12);
+    Ok(ops::suggest_portfolio(&ids, &nombres, &seqs, &metricas, max_corr, max_mem))
+}
+
+/// Perfil de riesgo de una estrategia: MAE/MFE, expectativa y capital diario.
+#[tauri::command]
+pub fn analyze_strategy_risk(
+    state: State<AppState>,
+    strategy_id: i64,
+) -> Result<serde_json::Value, String> {
+    let (core, bars_path) = {
+        let db = state.db.lock();
+        let core = load_core(&db, strategy_id)?;
+        let path: String = db
+            .query_row(
+                "select df.file_path from backtest_runs b
+                 join data_files df on df.id = b.data_file_id
+                 where b.strategy_id = ?1 order by b.id desc limit 1",
+                q![strategy_id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default();
+        (core, path)
+    };
+    if bars_path.is_empty() {
+        return Err("esta estrategia no tiene dataset cargado".into());
+    }
+    let bars = datastore::Qfn::read(std::path::Path::new(&bars_path)).map_err(|e| e.to_string())?;
+    let cfg = EngineCfg::default();
+    ops::risk_profile(&bars, core.template, core.params, &cfg)
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<AppState>) -> Result<serde_json::Value, String> {
     let db = state.db.lock();
@@ -1657,6 +1718,27 @@ pub fn get_strategy_chart(state: State<AppState>, strategy_id: i64) -> Result<se
     let step = (core.bars.len() / 400).max(1);
     let sampled: Vec<&Bar> = core.bars.iter().step_by(step).collect();
     let candles: Vec<serde_json::Value> = sampled.iter().map(|b| serde_json::json!({ "o": b.open, "h": b.high, "l": b.low, "c": b.close })).collect();
+
+    // ── overlays: medias calculadas sobre TODAS las barras y muestreadas
+    //    con el mismo paso que las velas, para que queden alineadas ──
+    let closes: Vec<f64> = core.bars.iter().map(|b| b.close).collect();
+    let mut overlays: Vec<serde_json::Value> = Vec::new();
+    for (key, label, serie) in [
+        ("ema20", "EMA 20", super::engine::indicators::ema(&closes, 20)),
+        ("ema50", "EMA 50", super::engine::indicators::ema(&closes, 50)),
+        ("sma200", "SMA 200", super::engine::indicators::sma(&closes, 200)),
+    ] {
+        if core.bars.len() < 50 { continue; }
+        let puntos: Vec<Option<f64>> = serie
+            .iter()
+            .step_by(step)
+            .take(sampled.len())
+            .map(|v| if v.is_finite() { Some(round2f(*v)) } else { None })
+            .collect();
+        if puntos.iter().any(|p| p.is_some()) {
+            overlays.push(serde_json::json!({ "key": key, "label": label, "points": puntos }));
+        }
+    }
     let n = sampled.len();
     let trades: Vec<serde_json::Value> = out.trades.iter().filter_map(|t| {
         // índice de la vela muestreada más cercana al cierre del trade
@@ -1667,7 +1749,7 @@ pub fn get_strategy_chart(state: State<AppState>, strategy_id: i64) -> Result<se
     // corte out-of-sample: la misma fraccion que usa la comprobacion walk-forward
     let oos_from = crate::engine::verdicts::oos_fraction();
     Ok(serde_json::json!({
-        "candles": candles, "trades": trades,
+        "candles": candles, "trades": trades, "overlays": overlays,
         "oosFrom": oos_from,
         "oosLabel": format!("Fuera de muestra (ultimo {:.0} %)", oos_from * 100.0),
     }))

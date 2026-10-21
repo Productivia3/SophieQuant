@@ -227,6 +227,9 @@ export function S06Chart() {
   const strategyId = +(params.id ?? 1)
   const [series, setSeries] = useState<ChartSeries | null>(null)
   const [name, setName] = useState('')
+  const [overlayOn, setOverlayOn] = useState<Record<string, boolean>>({
+    ema20: true, ema50: true, sma200: false,
+  })
 
   useEffect(() => {
     api.getStrategy(strategyId).then(s => setName(s?.name ?? `#${strategyId}`))
@@ -239,23 +242,44 @@ export function S06Chart() {
         <div className="p-4">
           <div className="rounded-md border border-border bg-surface p-3">
             <CandleChart candles={series.candles} trades={series.trades}
-              oosFrom={series.oosFrom} oosLabel={series.oosLabel} />
+              oosFrom={series.oosFrom} oosLabel={series.oosLabel}
+              overlays={series.overlays} overlayOn={overlayOn} />
           </div>
-          <p className="mt-2 text-xs text-muted">
-            {series.trades.length} operaciones · marcadores teal = compra, rosa = venta.
-            {series.oosFrom != null && ' La zona sombreada es fuera de muestra: los parámetros no se eligieron con esos datos.'}
-          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <span className="text-xs text-muted">
+              {series.trades.length} operaciones · marcadores teal = compra, rosa = venta.
+              {series.oosFrom != null && ' La zona sombreada es fuera de muestra: los parámetros no se eligieron con esos datos.'}
+            </span>
+            {(series.overlays ?? []).map(o => (
+              <label key={o.key} className="flex cursor-pointer items-center gap-1 text-xs text-muted">
+                <input type="checkbox" checked={overlayOn[o.key] !== false}
+                  aria-label={`Mostrar ${o.label}`}
+                  onChange={e => setOverlayOn({ ...overlayOn, [o.key]: e.target.checked })} />
+                <span aria-hidden className="inline-block h-0.5 w-4 rounded"
+                  style={{ background: OVERLAY_COLORS[o.key] ?? 'var(--color-accent)' }} />
+                {o.label}
+              </label>
+            ))}
+          </div>
         </div>
       )}
     </Page>
   )
 }
 
-function CandleChart({ candles, trades, oosFrom, oosLabel }: {
+const OVERLAY_COLORS: Record<string, string> = {
+  ema20: 'var(--chart-buy)',
+  ema50: 'var(--color-accent)',
+  sma200: 'var(--color-warning)',
+}
+
+function CandleChart({ candles, trades, oosFrom, oosLabel, overlays, overlayOn }: {
   candles: Candle[]
   trades: ChartSeries['trades']
   oosFrom?: number
   oosLabel?: string
+  overlays?: ChartSeries['overlays']
+  overlayOn?: Record<string, boolean>
 }) {
   const { w, h } = { w: 1000, h: 320 }
   const pad = 6
@@ -300,6 +324,21 @@ function CandleChart({ candles, trades, oosFrom, oosLabel }: {
               y={Math.min(y(c.o), y(c.c))} height={Math.max(1.5, Math.abs(y(c.o) - y(c.c)))}
               fill={color} />
           </g>
+        )
+      })}
+      {/* medias (overlays) */}
+      {(overlays ?? []).map(o => {
+        if (overlayOn && overlayOn[o.key] === false) return null
+        const pts: string[] = []
+        o.points.forEach((v, i) => {
+          if (v == null) return
+          pts.push(`${x(i).toFixed(1)},${y(v).toFixed(1)}`)
+        })
+        if (pts.length < 2) return null
+        return (
+          <polyline key={o.key} points={pts.join(' ')} fill="none"
+            stroke={OVERLAY_COLORS[o.key] ?? 'var(--color-accent)'}
+            strokeWidth={1.2} opacity={0.9} vectorEffect="non-scaling-stroke" />
         )
       })}
       {/* trades */}

@@ -651,6 +651,7 @@ export function S18Portfolio() {
   const [model, setModel] = useState<WeightingModel>('equal_vol')
   const [custom, setCustom] = useState<Record<number, number>>({})
   const [pesos, setPesos] = useState<PortfolioCalc | null>(null)
+  const [sug, setSug] = useState<Awaited<ReturnType<typeof api.suggestPortfolio>> | null>(null)
 
   useEffect(() => {
     api.listBank({}).then(rs => {
@@ -676,6 +677,25 @@ export function S18Portfolio() {
   const toggle = (id: number) =>
     setSelIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
 
+  async function sugerir() {
+    if (!rows?.length) return
+    setBusy(true); setSug(null)
+    try {
+      const s = await api.suggestPortfolio(rows.map(r => r.id))
+      setSug(s)
+    } finally {
+      setBusy(false)
+    }
+
+  }
+
+  function usarSugerencia() {
+    if (!sug?.elegidos?.length) return
+    setSelIds(sug.elegidos.map(e => e.strategyId))
+    setSug(null); setCorr(null); setEq(null); setPesos(null)
+  }
+
+
   return (
     <Page title="Cartera maestra" icon={<PieChart size={16} />}
       actions={
@@ -685,7 +705,13 @@ export function S18Portfolio() {
       }>
       <div className="grid gap-4 p-4 xl:grid-cols-[320px_1fr]">
         <div className="rounded-md border border-border bg-surface p-3">
-          <h2 className="mb-2 text-sm font-semibold text-muted">Estrategias (2–8)</h2>
+          <div className="mb-2 flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-muted">Estrategias (2–8)</h2>
+            <Button size="sm" variant="secondary" loading={busy}
+              onClick={() => void sugerir()} className="ml-auto">
+              Sugerir cartera
+            </Button>
+          </div>
           {!rows ? <TableSkeleton /> : (
             <ul className="max-h-96 divide-y divide-border overflow-auto qf-scroll text-sm" aria-label="Cartera">
               {rows.map(r => (
@@ -706,6 +732,46 @@ export function S18Portfolio() {
         </div>
 
         <div className="min-w-0 space-y-4">
+          {sug && (
+            <section className="mb-4 rounded-md border border-border bg-surface p-3">
+              <h2 className="mb-2 text-sm font-semibold text-muted">Sugerencia de cartera</h2>
+              <p className="mb-2 text-xs text-muted">{sug.notas}</p>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-muted">
+                    <th className="px-2 py-1 font-medium">Se queda</th>
+                    <th className="px-2 py-1 font-medium">Volatilidad</th>
+                    <th className="px-2 py-1 font-medium">Peso sugerido</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {sug.elegidos.map(e => (
+                    <tr key={e.strategyId}>
+                      <td className="px-2 py-1 truncate">{e.nombre}</td>
+                      <td className="px-2 py-1 font-mono text-xs">{fmtNum(e.volatility, 2)} %</td>
+                      <td className="px-2 py-1 font-mono text-xs">{fmtNum(e.pesoSugerido, 1)} %</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {sug.descartados.length > 0 && (
+                <>
+                  <h3 className="mb-1 mt-3 text-xs font-semibold text-muted">Se descartan y por que</h3>
+                  <ul className="space-y-0.5">
+                    {sug.descartados.map(d => (
+                      <li key={d.strategyId} className="text-xs text-muted">
+                        <span className="text-text">{d.nombre}</span>: {d.motivo}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              <Button variant="primary" size="sm" className="mt-3" onClick={usarSugerencia}>
+                Usar esta cartera
+              </Button>
+            </section>
+          )}
+
           <section className="rounded-md border border-border bg-surface p-3">
             <h2 className="mb-2 text-sm font-semibold text-muted">Ponderacion de la cartera</h2>
             <div className="flex flex-wrap items-center gap-2">

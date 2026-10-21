@@ -777,3 +777,27 @@ Las tres mejoras propuestas como prioritarias, en un solo bloque.
 - **Numeros**: paridad de 61,4 a **64,0** (total) y de 64,2 a **67,0** (alcance).
   Las filas «Gestion de datasets» y «Multiples periodos OOS» pasan a completas, y
   el enlace con Python se registra como funcion propia.
+
+---
+
+## Bloque de mejoras 2: overlays, cartera automatica y riesgo real - 21-10-2026
+
+Tercer bloque de mejoras, en el orden acordado (1 -> 3 -> 2).
+
+- **Overlays en el chart**: el motor calcula EMA 20, EMA 50 y SMA 200 sobre todas
+  las barras y las devuelve muestreadas con el mismo paso que las velas; el chart
+  las dibuja con interruptores para encender y apagar cada una.
+- **Ajuste automatico de cartera** (`engine/ops.rs::suggest_portfolio`): seleccion
+  greedily por calidad (beneficio por volatilidad) evitando solapes por
+  correlacion (> 0,7) y descartando lo que aporta menos que el resto. Cada
+  descarte lleva su motivo y la sugerencia trae el peso sugerido por miembro.
+  Command `suggest_portfolio` + panel con «Usar esta cartera».
+- **Riesgo real** (`engine/ops.rs::risk_profile`): el bucle de backtest calcula
+  las excursiones de cada posicion (MAE y MFE); de ahi sale el MAE/MFE medio, el
+  peor MAE, el mejor MFE, la expectativa por operacion y la **curva de capital
+  diario** (un punto por dia natural). Command `analyze_strategy_risk` + panel
+  en el detalle de la estrategia.
+- **Tests**: 64 Rust (1 nuevo de perfil de riesgo) y 103 e2e (3 nuevos). 0 avisos.
+- **Numeros**: paridad de 64,0 a **65,8** (total) y de 67,0 a **68,8** (alcance).
+  Las filas de graficos (MAE-MFE, overlays) pasan a completas, y el ajuste
+  automatico de cartera se registra como funcion propia.

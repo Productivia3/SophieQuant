@@ -65,6 +65,8 @@ fn main() {
             commands::compute_strategy_verdicts,
             commands::save_strategy_logic,
             commands::list_analysis_runs,
+            commands::suggest_portfolio,
+            commands::analyze_strategy_risk,
             commands::run_custom_analysis,
             commands::list_custom_analyses,
             commands::export_strategy_csv,

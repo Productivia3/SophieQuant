@@ -89,7 +89,8 @@ pub fn stored_metrics(db: &Connection, strategy_id: i64) -> Option<Metrics> {
                     n_trades: r.get::<_, Option<i64>>(10)?.unwrap_or(0) as u32,
                     avg_trade: r.get::<_, Option<f64>>(11)?.unwrap_or(0.0),
                     wfe: 0.0,
-                })
+                                mae_pct: 0.0, mfe_pct: 0.0,
+            })
             },
         )
         .optional()
@@ -663,6 +664,189 @@ pub fn retest_periods(
     }))
 }
 
+
+/// Sugerencia automatica de cartera.
+///
+/// Idea: de un conjunto de candidatas, quedarse con las que mas aportan por
+/// unidad de riesgo y que no se redundan entre si (correlacion alta). Cada
+/// descarte se explica con su motivo: no es una caja negra.
+pub fn suggest_portfolio(
+    ids: &[i64],
+    nombres: &[(i64, String)],
+    seqs: &[Vec<f64>],
+    metrics: &[Option<Metrics>],
+    max_corr: f64,
+    max_members: usize,
+) -> Value {
+    let n = ids.len();
+    if n == 0 {
+        return json!({ "elegidos": [], "descartados": [], "notas": "no hay candidatas" });
+    }
+    let matrix = corr_matrix(seqs);
+    let vol: Vec<f64> = seqs.iter().map(|s| volatility(s)).collect();
+
+    // calidad de cada candidata: beneficio por unidad de volatilidad
+    let calidad: Vec<f64> = (0..n)
+        .map(|i| {
+            let m = metrics.get(i).and_then(|x| x.as_ref());
+            let net = m.map(|x| x.net_profit).unwrap_or(0.0);
+            let v = vol[i].max(1e-9);
+            net / (v * 10_000.0)
+        })
+        .collect();
+
+    let mut orden: Vec<usize> = (0..n).collect();
+    orden.sort_by(|a, b| calidad[*b].partial_cmp(&calidad[*a]).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut elegidos: Vec<usize> = Vec::new();
+    let mut descartados: Vec<Value> = Vec::new();
+
+    for &i in orden.iter() {
+        if elegidos.len() >= max_members {
+            descartados.push(json!({
+                "strategyId": ids[i],
+                "nombre": nombres.get(i).map(|x| x.1.clone()).unwrap_or_default(),
+                "motivo": format!("la cartera ya tiene {} miembros", max_members),
+            }));
+            continue;
+        }
+        // correlacion maxima con los ya elegidos
+        let mut max_c = 0.0_f64;
+        let mut culpable = String::new();
+        for &j in elegidos.iter() {
+            let c = matrix[i][j].abs();
+            if c > max_c {
+                max_c = c;
+                culpable = nombres.get(j).map(|x| x.1.clone()).unwrap_or_default();
+            }
+        }
+        if !elegidos.is_empty() && max_c > max_corr {
+            descartados.push(json!({
+                "strategyId": ids[i],
+                "nombre": nombres.get(i).map(|x| x.1.clone()).unwrap_or_default(),
+                "motivo": format!("se solapa con {} (correlacion {:.2})", culpable, max_c),
+                "correlacion": (max_c * 100.0).round() / 100.0,
+            }));
+            continue;
+        }
+        // aporta mas que el promedio de lo ya elegido?
+        if !elegidos.is_empty() {
+            let media_calidad: f64 = elegidos.iter().map(|&j| calidad[j]).sum::<f64>() / elegidos.len() as f64;
+            if calidad[i] <= media_calidad {
+                descartados.push(json!({
+                    "strategyId": ids[i],
+                    "nombre": nombres.get(i).map(|x| x.1.clone()).unwrap_or_default(),
+                    "motivo": format!("aporta menos que el resto de la cartera (calidad {:.2} vs {:.2})", calidad[i], media_calidad),
+                }));
+                continue;
+            }
+        }
+        elegidos.push(i);
+    }
+
+    // pesos sugeridos: por calidad (inverso a volatilidad dentro de los elegidos)
+    let total_calidad: f64 = elegidos.iter().map(|&i| calidad[i].max(0.0)).sum();
+    let elegida: Vec<Value> = elegidos
+        .iter()
+        .map(|&i| json!({
+            "strategyId": ids[i],
+            "nombre": nombres.get(i).map(|x| x.1.clone()).unwrap_or_default(),
+            "volatility": (vol[i] * 100.0 * 100.0).round() / 100.0,
+            "calidad": (calidad[i] * 1000.0).round() / 1000.0,
+            "pesoSugerido": if total_calidad > 0.0 {
+                (calidad[i].max(0.0) / total_calidad * 100.0 * 10.0).round() / 10.0
+            } else { 0.0 },
+        }))
+        .collect();
+
+    json!({
+        "elegidos": elegida,
+        "descartados": descartados,
+        "notas": format!(
+            "seleccion greedily por calidad (beneficio por volatilidad) evitando correlaciones por encima de {:.2}",
+            max_corr
+        ),
+    })
+}
+
+
+/// Perfil de riesgo de una estrategia: MAE/MFE y curva de capital diaria.
+///
+/// - **MAE** (maxima excepcion adversa): cuanto se fue en contra la posicion.
+///   Es el dolor real de una estrategia: no solo cuanto perdio al final, sino
+///   cuanto estuvo_submitida.
+/// - **MFE** (maxima excepcion favorable): cuanto llego a favor. Si el MFE es
+///   grande y el resultado final malo, la salida se esta comiendo el recorrido.
+/// - **Capital diario**: un punto por dia natural, que es como se lee de verdad
+///   una cuenta: el equity por operaciones mezcla intradia y no dice nada del
+///   ritmo.
+pub fn risk_profile(
+    bars: &[Bar],
+    tmpl: Template,
+    params: [f64; 3],
+    cfg: &EngineCfg,
+) -> Result<Value, String> {
+    let out = backtest::run(bars, tmpl, params, cfg);
+    if out.trades.is_empty() {
+        return Err("esta estrategia no genera operaciones en el dataset".into());
+    }
+    // MAE/MFE medios en % del precio de entrada
+    let mut mae_sum = 0.0;
+    let mut mfe_sum = 0.0;
+    let mut peor_mae = 0.0;
+    let mut mejor_mfe = 0.0;
+    for t in &out.trades {
+        let ref_price = if t.open_price.abs() > 1e-12 { t.open_price } else { 1.0 };
+        let mae = t.mae / ref_price * 100.0;
+        let mfe = t.mfe / ref_price * 100.0;
+        mae_sum += mae;
+        mfe_sum += mfe;
+        if mae > peor_mae { peor_mae = mae; }
+        if mfe > mejor_mfe { mejor_mfe = mfe; }
+    }
+    let n = out.trades.len() as f64;
+
+    // curva de capital: un punto por dia natural
+    let mut balance = cfg.initial_balance;
+    let mut por_dia: Vec<(i64, f64)> = Vec::new();
+    for t in &out.trades {
+        balance += t.profit;
+        let dia = t.close_time.div_euclid(86_400);
+        match por_dia.last_mut() {
+            Some((d, _)) if *d == dia => {
+                if let Some(ultimo) = por_dia.last_mut() { ultimo.1 = balance; }
+            }
+            _ => por_dia.push((dia, balance)),
+        }
+    }
+    let mut capital: Vec<Value> = Vec::with_capacity(por_dia.len() + 1);
+    capital.push(json!({ "t": por_dia.first().map(|(d, _)| d * 86_400).unwrap_or(0), "v": cfg.initial_balance }));
+    for (dia, v) in por_dia {
+        capital.push(json!({ "t": dia * 86_400, "v": v }));
+    }
+
+    // expectativa: media del resultado por operacion, en dinero y en % del balance
+    let neta = out.metrics.net_profit;
+    let expectativa = neta / n;
+    let expectativa_pct = if cfg.initial_balance > 0.0 {
+        expectativa / cfg.initial_balance * 100.0
+    } else { 0.0 };
+
+    Ok(json!({
+        "maePct": ((mae_sum / n) * 100.0).round() / 100.0,
+        "mfePct": ((mfe_sum / n) * 100.0).round() / 100.0,
+        "peorMaePct": (peor_mae * 100.0).round() / 100.0,
+        "mejorMfePct": (mejor_mfe * 100.0).round() / 100.0,
+        "expectativa": (expectativa * 100.0).round() / 100.0,
+        "expectativaPct": (expectativa_pct * 100.0).round() / 100.0,
+        "nTrades": out.trades.len(),
+        "capitalDiario": capital,
+        "notas": "MAE = lo peor que se puso la posicion; MFE = lo mejor que llego a tomar. "
+            .to_string()
+            + "Un MFE alto con resultado mediocre significa que la salida se come el recorrido.",
+    }))
+}
+
 // ── retest OOS ──────────────────────────────────────────────────────
 
 
@@ -830,7 +1014,7 @@ pub fn spp(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String> {
                 let mut two: Vec<Trade> = Vec::with_capacity(base_out.trades.len() * 2);
                 for t in &base_out.trades {
                     for _ in 0..2 {
-                        two.push(Trade { direction: t.direction, open_time: t.open_time, open_price: t.open_price, close_time: t.close_time, close_price: t.close_price, profit: t.profit / 2.0, bars: t.bars });
+                        two.push(Trade { direction: t.direction, open_time: t.open_time, open_price: t.open_price, close_time: t.close_time, close_price: t.close_price, profit: t.profit / 2.0, bars: t.bars , mae: t.mae, mfe: t.mfe });
                     }
                 }
                 let eq = super::metrics::equity_series(&two, cfg.initial_balance, 500);
@@ -1006,6 +1190,33 @@ mod tests {
         let r = retest_periods(&barras, Template::MaCross, [20.0, 50.0, 0.0], &cfg, 1).unwrap();
         assert_eq!(r["periodos"].as_array().unwrap().len(), 1);
         assert_eq!(r["consistencia"]["total"], 1);
+    }
+
+
+    /// El perfil de riesgo da MAE/MFE coherentes y una curva de capital diaria.
+    #[test]
+    fn el_perfil_de_riesgo_da_mae_mfe_y_capital_diario() {
+        let cfg = EngineCfg::default();
+        let barras = serie_con_ciclos(1200);
+        let r = risk_profile(&barras, Template::MaCross, [20.0, 50.0, 0.0], &cfg)
+            .expect("el perfil de riesgo debe funcionar");
+        // MAE >= 0 y MFE >= 0, y el MFE no puede ser menor que el MAE medio
+        let mae = r["maePct"].as_f64().unwrap();
+        let mfe = r["mfePct"].as_f64().unwrap();
+        assert!(mae >= 0.0 && mfe >= 0.0, "mae {mae} mfe {mfe}");
+        assert!(r["peorMaePct"].as_f64().unwrap() >= mae);
+        assert!(r["mejorMfePct"].as_f64().unwrap() >= mfe);
+        // la curva de capital empieza en el balance y es monotona en el tiempo
+        let capital = r["capitalDiario"].as_array().unwrap();
+        assert!(capital.len() >= 2, "pocos puntos de capital");
+        assert_eq!(capital[0]["v"].as_f64().unwrap(), cfg.initial_balance);
+        let mut t_prev = i64::MIN;
+        for p in capital {
+            let t = p["t"].as_i64().unwrap();
+            assert!(t >= t_prev, "el capital debe ir en orden temporal");
+            t_prev = t;
+        }
+        assert!(r["nTrades"].as_u64().unwrap() > 0);
     }
 
     /// Serie con ciclos claros: hace que el cruce de medias genere operaciones.

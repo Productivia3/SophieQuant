@@ -1,6 +1,6 @@
 {
   "all": {
-    "feature_score": 64.0,
+    "feature_score": 65.8,
     "counted": 51,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -41,18 +41,13 @@
         "features": 1
       },
       {
-        "area": "chart",
-        "score": 50.0,
-        "features": 1
-      },
-      {
         "area": "platform",
         "score": 50.0,
         "features": 1
       },
       {
         "area": "backtester",
-        "score": 69.2,
+        "score": 76.9,
         "features": 5
       },
       {
@@ -92,6 +87,11 @@
       },
       {
         "area": "editor",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "chart",
         "score": 100.0,
         "features": 1
       }
@@ -231,20 +231,6 @@
         "notes": "no implementado y NO se anuncia en la UI"
       },
       {
-        "feature": "Graficos equity / MAE-MFE / capital diario",
-        "area": "backtester",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "curva de equity real en S06 y equity de cartera; sin MAE/MFE ni curva de capital diario"
-      },
-      {
-        "feature": "Ver trades en el chart con indicadores",
-        "area": "chart",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
-      },
-      {
         "feature": "Logica difusa (fuzzy) en estrategias generadas",
         "area": "builder",
         "priority": "could",
@@ -380,12 +366,19 @@
         "priority": "could",
         "clone": "yes",
         "notes": "PROPIO: la app escribe el contrato (estrategia + CSV de barras), ejecuta el script del usuario SIN shell y con limite de 60 s, valida la salida (solo veredicto/etiqueta/metricas/notas) y la guarda; hay un script de ejemplo"
+      },
+      {
+        "feature": "Ajuste automatico de cartera: que meter y por que descartar",
+        "area": "portfolio",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: seleccion greedily por calidad (beneficio por volatilidad) evitando solapes (correlacion > 0.7) y explicando cada descarte; con pesos sugeridos"
       }
     ],
     "problems": []
   },
   "inscope": {
-    "feature_score": 67.0,
+    "feature_score": 68.8,
     "counted": 48,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -416,18 +409,13 @@
         "features": 1
       },
       {
-        "area": "chart",
-        "score": 50.0,
-        "features": 1
-      },
-      {
         "area": "platform",
         "score": 50.0,
         "features": 1
       },
       {
         "area": "backtester",
-        "score": 69.2,
+        "score": 76.9,
         "features": 5
       },
       {
@@ -472,6 +460,11 @@
       },
       {
         "area": "editor",
+        "score": 100.0,
+        "features": 1
+      },
+      {
+        "area": "chart",
         "score": 100.0,
         "features": 1
       }
@@ -595,20 +588,6 @@
         "priority": "should",
         "clone": "no",
         "notes": "no implementado y NO se anuncia en la UI"
-      },
-      {
-        "feature": "Graficos equity / MAE-MFE / capital diario",
-        "area": "backtester",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "curva de equity real en S06 y equity de cartera; sin MAE/MFE ni curva de capital diario"
-      },
-      {
-        "feature": "Ver trades en el chart con indicadores",
-        "area": "chart",
-        "priority": "should",
-        "clone": "partial",
-        "notes": "S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
       },
       {
         "feature": "Logica difusa (fuzzy) en estrategias generadas",
@@ -739,6 +718,13 @@
         "priority": "could",
         "clone": "yes",
         "notes": "PROPIO: la app escribe el contrato (estrategia + CSV de barras), ejecuta el script del usuario SIN shell y con limite de 60 s, valida la salida (solo veredicto/etiqueta/metricas/notas) y la guarda; hay un script de ejemplo"
+      },
+      {
+        "feature": "Ajuste automatico de cartera: que meter y por que descartar",
+        "area": "portfolio",
+        "priority": "could",
+        "clone": "yes",
+        "notes": "PROPIO: seleccion greedily por calidad (beneficio por volatilidad) evitando solapes (correlacion > 0.7) y explicando cada descarte; con pesos sugeridos"
       }
     ],
     "problems": []

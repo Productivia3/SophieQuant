@@ -6,7 +6,7 @@ Gestion de datasets: resample / checks de calidad / conversion,data,should,yes,y
 Motor de backtesting con precision de tick,backtester,must,yes,partial,"motor real sobre barras (m1) con spread, comision y sin lookahead (21 tests); no hay tick"
 Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes),backtester,must,yes,partial,"el retesteo prueba la MISMA regla en varios mercados a la vez (multi-mercado: una columna por mercado, veredicto por mercado y resumen 'sobrevive en X de Y'); el backtest principal sigue siendo de un simbolo y no hay charts de entrada concurrentes"
 Metricas estandar completas (Net/Sharpe/DD/PF/trades/Z/R2),backtester,must,yes,yes,"net, gross, PF, win rate, maxDD, RDD, Sharpe, Sortino, Z, R2, trades, avg trade y WFE (engine::metrics)"
-Graficos equity / MAE-MFE / capital diario,backtester,should,yes,partial,curva de equity real en S06 y equity de cartera; sin MAE/MFE ni curva de capital diario
+Graficos equity / MAE-MFE / capital diario,backtester,should,yes,yes,"curva de equity real + PERFIL DE RIESGO con MAE (peor excursion adversa), MFE (mejor excursion favorable), expectativa por operacion y curva de capital diario (un punto por dia)"
 Deteccion automatica de problemas de estrategia,backtester,should,yes,yes,escaner en el Laboratorio (S24) con problemas detectados por estrategia y avisos por metrica
 Filtrado avanzado por cualquier metrica,filtering,must,yes,yes,"filtros por CUALQUIER metrica del motor (PF, Sharpe, Sortino, MaxDD, RDD, win rate, Z, R2, beneficio medio, n trades) con operador y valor; metricas y validacion vienen del motor (engine/robust.rs + comando list_build_metrics)"
 Generacion de estrategias por programacion genetica,builder,must,yes,yes,"genetic::build con mutacion, seleccion, pausa y determinismo por semilla; ademas ordena por score de robustez en vez de por beneficio"
@@ -43,7 +43,7 @@ Export a MultiCharts,export,should,yes,no,no implementado y NO se anuncia en la 
 Export a JForex,export,should,yes,no,no implementado y NO se anuncia en la UI
 Editor de estrategia integrado sin codigo,editor,should,yes,yes,"S07 edita las tres reglas que el motor ejecuta (cruce de medias, reversion RSI, ruptura ATR); guardar persiste la regla y RECALCULA la corrida sobre el dataset (metricas, equity y corte OOS). Comando real save_strategy_logic + tests de integracion en Rust"
 Editor visual AlgoWizard (bloques drag&drop),editor,could,yes,skip,excluido por decision del propietario (uso personal)
-Ver trades en el chart con indicadores,chart,should,yes,partial,"S06 con velas, trades y marcadores SVG; sin overlays de indicadores"
+Ver trades en el chart con indicadores,chart,should,yes,yes,"S06 con velas, operaciones y OVERLAYS de medias (EMA 20/50 y SMA 200) calculados en el motor sobre todas las barras, con interruptores para activarlas"
 ATM - Advanced Trade Management (multiples salidas escaladas),portfolio,could,yes,no,excluido por decision del propietario; es la funcion premium del original
 Laboratorio: dashboard de analisis profundo,analyzer,should,yes,yes,"S24 con resumen del banco, tabla, metricas y pestanas; motor Rust real (engine::ops)"
 Laboratorio: Monte Carlo de cartera,analyzer,could,yes,yes,S24 pestana MC de cartera con percentiles de equity final y probabilidad de rotura; motor Rust real
@@ -62,3 +62,4 @@ Historial de analisis con comparacion entre corridas (antes/despues de cambiar u
 Verificacion del export: que ha asumido el backtest y checklist para MetaTrader,export,could,no,yes,"PROPIO: al generar el EA se muestran los supuestos reales (barras y no ticks, spread/comision del modelo, posicion fija, solo largo, sin horarios) y una checklist de 8 puntos para comprobar en MT5; documento en replica/export-verificacion.md"
 Diagnostico de calidad del dataset importado,data,could,no,yes,"PROPIO: el importador comprueba el fichero (huecos, volumen cero, precios incoherentes, timestamps repetidos) y lo dice: es lo que explica que el backtest sea mas optimista que el broker"
 Custom Analysis: enlace con scripts de Python (contrato versionado),workflows,could,no,yes,"PROPIO: la app escribe el contrato (estrategia + CSV de barras), ejecuta el script del usuario SIN shell y con limite de 60 s, valida la salida (solo veredicto/etiqueta/metricas/notas) y la guarda; hay un script de ejemplo"
+Ajuste automatico de cartera: que meter y por que descartar,portfolio,could,no,yes,PROPIO: seleccion greedily por calidad (beneficio por volatilidad) evitando solapes (correlacion > 0.7) y explicando cada descarte; con pesos sugeridos

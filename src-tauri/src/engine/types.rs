@@ -27,6 +27,10 @@ pub struct Trade {
     pub close_price: f64,
     pub profit: f64, // en dinero de cuenta, tras comisiones y spread
     pub bars: u32,
+    /// Maxima excepcion adversa: cuanto se fue en contra la posicion (precio).
+    pub mae: f64,
+    /// Maxima excepcion favorable: cuanto llego a favor de la posicion (precio).
+    pub mfe: f64,
 }
 
 /// Parámetros de configuración del backtest (engine_cfg en la DB).
@@ -78,6 +82,10 @@ pub struct Metrics {
     pub n_trades: u32,
     pub avg_trade: f64,
     pub wfe: f64,          // placeholder V1: se calcula en Matriz WF
+    /// MAE medio en % del precio de entrada: cuanto se fue en contra la estrategia.
+    pub mae_pct: f64,
+    /// MFE medio en % del precio de entrada: cuanto llego a favor.
+    pub mfe_pct: f64,
 }
 
 impl Default for Metrics {
@@ -86,6 +94,7 @@ impl Default for Metrics {
             net_profit: 0.0, gross_profit: 0.0, profit_factor: 0.0, win_rate: 0.0,
             max_dd: 0.0, rdd: 0.0, sharpe: 0.0, sortino: 0.0, z_score: 0.0,
             r_squared: 0.0, n_trades: 0, avg_trade: 0.0, wfe: 0.0,
+            mae_pct: 0.0, mfe_pct: 0.0,
         }
     }
 }

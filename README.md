@@ -23,7 +23,7 @@ mágico.
 | **Monte Carlo** | Las 9 pruebas estándar (reordenar, saltar, aleatorizar parámetros, variantes de dirección, interpolación OHLC, reconstruir retornos, drawdown, duplicar, omitir periodos). |
 | **SPP** | Permutación de las piezas de la estrategia: mide cuánto depende el resultado de una sola decisión. |
 | **Perfil de optimización** | Curva net–parámetro: meseta (robusta) o pico (frágil). |
-| **Cartera** | Agrupa estrategias, mide correlación y simula la cartera. |
+| **Cartera** | Agrupa estrategias, mide correlación, pondera por cuatro modelos y **sugiere qué meter** (explicando cada descarte). |
 | **Laboratorio** | Métricas avanzadas, Monte Carlo de cartera y simulación de gestión de capital. |
 | **Editor sin código** | Edita la regla (3 plantillas que el motor ejecuta de verdad) y **recalcula la corrida**. |
 | **Análisis personalizado** | Ejecuta **tu** script de Python sobre la estrategia y sus barras, con un contrato versionado y salida validada. |
@@ -49,7 +49,7 @@ referencia:
 
 | Métrica | Valor |
 | --- | --- |
-| Paridad de funcionalidades | **64,0 / 100** (67,0 dentro del alcance definido) |
+| Paridad de funcionalidades | **65,8 / 100** (68,8 dentro del alcance definido) |
 | Must-haves completos | **10 de 20** |
 | Tests Rust | **40 / 40** |
 | Tests end-to-end + accesibilidad (axe) | **88 / 88** |

@@ -50,6 +50,9 @@ pub fn run_signals(
     let mut entry_time = 0i64;
     let mut stop = 0.0f64;
     let mut take = 0.0f64;
+    // excursiones de la posicion en curso (MAE/MFE)
+    let mut mae_px = 0.0f64;
+    let mut mfe_px = 0.0f64;
 
     for i in 1..bars.len() {
         let sig = signals[i];
@@ -57,6 +60,11 @@ pub fn run_signals(
         if in_pos {
             // 1) stop / target intra-barra (conservador: stop primero)
             let b = bars[i];
+            // excursiones: lo peor y lo mejor mientrasomia la posicion
+            let adverso = entry_price - b.low;
+            let favorable = b.high - entry_price;
+            if adverso > mae_px { mae_px = adverso; }
+            if favorable > mfe_px { mfe_px = favorable; }
             let exit_price = if b.low <= stop {
                 Some(stop - slip_price)
             } else if cfg.tp_atr_mult > 0.0 && b.high >= take {
@@ -78,6 +86,8 @@ pub fn run_signals(
                     close_price: px,
                     profit,
                     bars: (i as i64 - 0) as u32, // aproximación V1
+                    mae: mae_px,
+                    mfe: mfe_px,
                 });
                 in_pos = false;
             }
@@ -91,6 +101,8 @@ pub fn run_signals(
                 in_pos = true;
                 entry_price = px;
                 entry_time = next.time;
+                mae_px = 0.0;
+                mfe_px = 0.0;
                 stop = if a.is_nan() { px - 30.0 * cfg.pip_size } else { px - a * cfg.sl_atr_mult };
                 take = if a.is_nan() || cfg.tp_atr_mult <= 0.0 { f64::INFINITY } else { px + a * cfg.tp_atr_mult };
             }

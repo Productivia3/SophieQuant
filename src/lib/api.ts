@@ -395,8 +395,19 @@ export const api = {
       trades.push({ idx: i, dir, entry: candles[i].c, exit: candles[Math.min(i + 8, 179)].c })
     }
     // mismo corte out-of-sample que el motor real (60 % in-sample)
+    // overlays de ejemplo: medias sobre los cierres
+    const closes = candles.map(c => c.c)
+    const media = (period: number) => closes.map((_, i) => {
+      if (i < period - 1) return null
+      const trozo = closes.slice(i - period + 1, i + 1)
+      return Math.round((trozo.reduce((a, b) => a + b, 0) / period) * 10000) / 10000
+    })
     return {
       candles, trades,
+      overlays: [
+        { key: 'ema20', label: 'EMA 20', points: media(20) },
+        { key: 'ema50', label: 'EMA 50', points: media(50) },
+      ],
       oosFrom: 0.4,
       oosLabel: 'Fuera de muestra (ultimo 40 %)',
     }
@@ -1046,6 +1057,62 @@ export const api = {
     }
   },
 
+  /**
+   * Sugiere que estrategias meter en la cartera, con el motivo de cada descarte.
+   */
+  async suggestPortfolio(
+    candidateIds: number[], maxCorrelation = 0.7, maxMembers = 8,
+  ): Promise<{
+    elegidos: Array<{ strategyId: number; nombre: string; volatility: number; calidad: number; pesoSugerido: number }>
+    descartados: Array<{ strategyId: number; nombre: string; motivo: string; correlacion?: number }>
+    notas: string
+  }> {
+    const r = await real<{
+      elegidos: Array<{ strategyId: number; nombre: string; volatility: number; calidad: number; pesoSugerido: number }>
+      descartados: Array<{ strategyId: number; nombre: string; motivo: string; correlacion?: number }>
+      notas: string
+    }>('suggest_portfolio', { candidateIds, maxCorrelation, maxMembers })
+    if (r) return r
+    await delay(500)
+    // fake: las cuatro primeras se eligen y el resto se descarta por solape
+    const elegidos = candidateIds.slice(0, Math.min(4, candidateIds.length)).map((id, i) => ({
+      strategyId: id,
+      nombre: db.strategies.find(s => s.id === id)?.name ?? `#${id}`,
+      volatility: 4 + i,
+      calidad: 1.2 - i * 0.1,
+      pesoSugerido: 100 / Math.min(4, candidateIds.length),
+    }))
+    const descartados = candidateIds.slice(elegidos.length).map(id => ({
+      strategyId: id,
+      nombre: db.strategies.find(s => s.id === id)?.name ?? `#${id}`,
+      motivo: 'se solapa con las elegidas (correlacion 0.81)',
+      correlacion: 0.81,
+    }))
+    return {
+      elegidos, descartados,
+      notas: 'seleccion greedily por calidad (beneficio por volatilidad) evitando correlaciones por encima de 0.70',
+    }
+  },
+
+  /**
+   * Perfil de riesgo de una estrategia: MAE/MFE, expectativa y capital diario.
+   */
+  async analyzeStrategyRisk(strategyId: number): Promise<{
+    maePct: number; mfePct: number; peorMaePct: number; mejorMfePct: number
+    expectativa: number; expectativaPct: number; nTrades: number
+    capitalDiario: Array<{ t: number; v: number }>
+    notas: string
+  }> {
+    const r = await realStrict<{
+      maePct: number; mfePct: number; peorMaePct: number; mejorMfePct: number
+      expectativa: number; expectativaPct: number; nTrades: number
+      capitalDiario: Array<{ t: number; v: number }>
+      notas: string
+    }>('analyze_strategy_risk', { strategyId })
+    if (!r) throw new Error('El analisis de riesgo real solo funciona en la app de escritorio.')
+    return r
+  },
+
   /** Veredictos ya calculados (cache en la DB). */
   async listVerdicts(strategyIds: number[]): Promise<StrategyVerdicts[]> {
     const r = await real<{ rows: StrategyVerdicts[] }>('get_strategy_verdicts', { strategyIds })
@@ -1143,6 +1210,8 @@ export interface WfMatrixResult {
 export interface ChartSeries {
   candles: Array<{ o: number; h: number; l: number; c: number }>
   trades: Array<{ idx: number; dir: 'buy' | 'sell'; entry: number; exit: number }>
+  /** Medias dibujadas sobre el precio (EMA 20/50, SMA 200), alineadas con las velas. */
+  overlays?: Array<{ key: string; label: string; points: Array<number | null> }>
   /** Fraccion del dataset que es out-of-sample (mismo corte que la prueba walk-forward). */
   oosFrom?: number
   oosLabel?: string

@@ -10,8 +10,8 @@ Fecha: 20-10-2026 · Herramientas: `.claude/skills/replica-diff/parity.py` y
 
 | Métrica | Valor | Cómo se ha medido |
 | --- | --- | --- |
-| **Paridad de funcionalidades (todas)** | **64,0 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
-| **Paridad dentro del alcance que definiste** | **67,0 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
+| **Paridad de funcionalidades (todas)** | **65,8 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
+| **Paridad dentro del alcance que definiste** | **68,8 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
 | Must-haves completos | **10 de 20** | |
 | Layout (pantalla Retesteo) | **17,8 / 100** | `imgdiff.py` en modo layout contra un recorte de la captura pública del original |
 
@@ -388,6 +388,25 @@ Las tres mejoras que se propusieron como bloque:
   `metricas` numericas y `notas`) y la guarda con su historial. Hay un script de
   ejemplo funcionando (`ejemplos/ejemplo_sharpe.py`) y el contrato documentado en
   `replica/custom-analysis.md`.
+
+
+### 12) Overlays, cartera automatica y riesgo real — **hecho**
+
+Tercer bloque de mejoras (el orden acordado: 1 -> 3 -> 2).
+
+- **Overlays en el chart** (S06): EMA 20, EMA 50 y SMA 200 calculadas por el
+  motor **sobre todas las barras** y muestreadas con el mismo paso que las velas,
+  de modo que la linea coincide con el precio. Con interruptores para activar y
+  desactivar cada una.
+- **Ajuste automatico de cartera**: de las candidatas, se queda con las que mas
+  aportan por unidad de riesgo (beneficio sobre volatilidad) evitando las que se
+  solapan (correlacion por encima de 0,7). **Cada descarte lleva su motivo**
+  («se solapa con S004 (correlacion 0,82)»), y la sugerencia trae el peso
+  sugerido de cada miembro. Boton «Usar esta cartera» para aplicarla de un clic.
+- **Riesgo real**: MAE (cuanto se fue en contra la posicion), MFE (cuanto llego a
+  favor), expectativa por operacion y **curva de capital diario** (un punto por
+  dia natural, que es como se lee de verdad una cuenta). El motor calcula las
+  excursiones durante el bucle de backtest, sin coste adicional.
 
 ---
 
