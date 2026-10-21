@@ -6,6 +6,7 @@ import {
   Download, Repeat, FileDown, GitCompareArrows, Menu, X,
 } from 'lucide-react'
 import { useState } from 'react'
+import { api } from '../lib/api'
 
 const items = [
   { to: '/', label: 'Proyecto', icon: LayoutDashboard },
@@ -116,7 +117,7 @@ export function Shell() {
           <span>SophieQuant 0.1 · datos locales</span>
           <span className="ml-auto flex items-center gap-1">
             <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-success" />
-            <span>núcleo Rust conectado</span>
+            <span>{api.isDesktop() ? 'núcleo Rust conectado' : 'núcleo simulado (navegador)'}</span>
           </span>
           <button onClick={() => navigate('/design')} className="hover:text-text">design system</button>
         </footer>

@@ -626,7 +626,8 @@ export const api = {
     }
   },
 
-  // NOTA V1: en escritorio queda fake — falta tauri-plugin-dialog para que el usuario
+  // Importacion: en escritorio usa el selector nativo (plugin de dialogo) y el
+  // command real import_data_csv; en el navegador sigue el input de ficheros.
   // elija el CSV y pasárselo a import_data_csv (el command ya existe en Rust).
   /** ¿Estamos en la app de escritorio (Tauri) o en el navegador de desarrollo? */
   isDesktop(): boolean {

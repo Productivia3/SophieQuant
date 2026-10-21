@@ -516,8 +516,9 @@ export function S23Settings() {
         </div>
 
         <p className="text-xs text-muted">
-          Nota honesta de Fase 4: los ajustes se guardan en la capa fake (sesión). Con el
-          puente Rust vivirán en un fichero de configuración real junto a la base de datos.
+          {api.isDesktop()
+            ? 'Los ajustes se guardan de verdad en la base de datos local (fichero app_settings), junto a todo lo demas.'
+            : 'En el navegador los ajustes se guardan solo en la sesion: la app de escritorio los escribe en la base de datos local.'}
         </p>
       </div>
     </Page>

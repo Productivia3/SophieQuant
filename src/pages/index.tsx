@@ -136,9 +136,12 @@ export function S01Dashboard() {
         <div className="rounded-md border border-border bg-surface p-4">
           <h2 className="mb-3 text-base font-semibold">Resumen</h2>
           <StatRow className="flex-col items-stretch">
-            <StatCard label="Estrategias en el banco" value={bankSize ?? 0} />
-            <StatCard label="Generaciones totales" value={builds?.length ?? 0} />
-            <StatCard label="Núcleo" value="fake (Rust pendiente)" mono={false} />
+            <StatCard label="Estrategias en el banco" value={String(bankSize ?? 0)} />
+            <StatCard label="Generaciones totales" value={String(builds?.length ?? 0)} />
+            <StatCard
+              label="Núcleo"
+              value={api.isDesktop() ? 'Rust (motor real)' : 'simulado (navegador)'}
+              mono={false} />
           </StatRow>
           <Link to="/data" className="mt-4 inline-flex items-center gap-1 text-sm text-accent hover:underline">
             <Database size={13} aria-hidden /> Gestionar datos históricos

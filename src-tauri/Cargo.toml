@@ -3,6 +3,13 @@ name = "sophiequant"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+# Por defecto la app sirve la interfaz embebida en el propio binario.
+# `tauri dev` arranca con `--no-default-features`, que es lo que hace que en
+# desarrollo use el servidor de Vite en localhost:1420.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

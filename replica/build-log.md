@@ -594,3 +594,42 @@ Las dos tareas de calidad que quedaban abiertas, cerradas.
 - Dos commits subidos: `5f4e959` (producto) y `352dad4` (preparacion).
   130 ficheros en el remoto; verificado que no hay node_modules, target, dist
   ni material de terceros.
+
+---
+
+## Correccion: el acceso directo abria «no se puede conectar a localhost» - 21-10-2026
+
+**Sintoma**: el acceso directo lanzaba la app y esta se quedaba en «no se puede
+conectar a localhost».
+
+**Causa**: el binario de release se habia compilado con `cargo build --release`
+a secas, **sin el rasgo `custom-protocol`**. Ese rasgo es el que hace que Tauri
+sirva la interfaz embebida en el binario; sin el, el ejecutable espera al
+servidor de desarrollo (`devUrl` = localhost:1420) y no encuentra nada. El
+`Cargo.toml` no declaraba el rasgo porque el proyecto nacio de una plantilla
+simplificada.
+
+**Correccion**: en `src-tauri/Cargo.toml`:
+```toml
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+```
+`tauri dev` sigue arrancando con `--no-default-features` (servidor de Vite), y
+el release ahora sirve la interfaz embebida.
+
+**Ademas**, la captura de la ventana de la app (que no habia hecho nunca) destapo
+tres textos que mentian segun el modo:
+- el panel Resumen decia «Nucleo: fake (Rust pendiente)» cuando el motor Rust es
+  real -> ahora dice «Rust (motor real)» en escritorio y «simulado (navegador)»
+  en el navegador;
+- el pie de pagina decia «nucleo Rust conectado» incluso en el navegador, donde
+  el nucleo es el fake -> ahora es honesto en los dos modos;
+- la nota de Ajustes decia que los ajustes se guardan «en la capa fake (sesion)»
+  cuando en escritorio van a la base de datos -> ahora distingue los dos casos.
+- y los contadores del panel se mostraban como «0.00» (formato de dinero para
+  contar estrategias) -> ahora son enteros.
+
+**Verificado**: binario release recompilado, lanzado **desde el acceso directo**,
+captura de la ventana real (la interfaz se pinta entera, sin tocar localhost) y
+sin conexiones al puerto 1420. 88/88 e2e y 40/40 tests Rust.

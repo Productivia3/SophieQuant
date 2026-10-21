@@ -84,9 +84,24 @@ npm run dev            # http://localhost:1420
 ## Compilar
 
 ```bash
+npm run tauri build                # recomendado: binario + instalador (.msi)
+# o solo el binario:
 npm run build                      # bundle web (dist/)
 cargo build --release --manifest-path src-tauri/Cargo.toml
-# binario: src-tauri/target/release/sophiequant.exe
+# -> src-tauri/target/release/sophiequant.exe
+```
+
+**Importante:** el binario de release **debe** compilarse con el rasgo
+`custom-protocol` (viene activo por defecto en `src-tauri/Cargo.toml`). Ese rasgo
+es el que hace que la app sirva la interfaz embebida en vez de esperar al
+servidor de desarrollo: sin el, el ejecutable arranca y muestra «no se puede
+conectar a localhost». `tauri dev` funciona porque arranca con
+`--no-default-features`.
+
+Acceso directo al Escritorio:
+
+```bash
+powershell -ExecutionPolicy Bypass -File scripts\crear-acceso-directo.ps1
 ```
 
 ## Tests
