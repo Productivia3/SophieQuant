@@ -401,26 +401,59 @@ export const api = {
 
   // ── Fase 3: retest · improver · optimizer · SPP · portfolio · projects (fake) ──
 
-  async runRetest(strategyIds: number[], symbolId: number, timeframe: Timeframe): Promise<RetestResult> {
-    const r = await real<RetestResult>('run_retest', { strategyIds, symbolId, timeframe })
+  async runRetest(strategyIds: number[], symbolIds: number[], timeframe: Timeframe): Promise<RetestResult> {
+    const r = await real<RetestResult>('run_retest', { strategyIds, symbolIds, timeframe })
     if (r) return r
     await delay(900)
+    // fake: cada mercado se comporta de forma distinta (a veces sin datos)
     return {
-      symbolId, timeframe,
+      timeframe,
+      mercados: symbolIds.map(id => ({
+        symbolId: id,
+        simbolo: db.symbols.find(s => s.id === id)?.name ?? `#${id}`,
+        // misma regla que el panel: hay dataset de ese simbolo en esa temporalidad
+        conDatos: db.dataFiles.some(d =>
+          d.symbolId === id && d.timeframe === timeframe && d.status === 'ready'),
+      })),
       rows: strategyIds.map(id => {
         const base = db.strategies.find(s => s.id === id)?.lastRun?.metrics
-        if (!base) return { strategyId: id, original: null, retest: null, verdict: 'fail' as const }
-        const scale = 0.55 + rnd() * 0.8   // fuera de mercado: mitad peor, mitad ok
-        const retest: Metrics = {
-          ...base,
-          netProfit: base.netProfit * scale,
-          profitFactor: Math.max(0.3, base.profitFactor * (0.8 + rnd() * 0.45)),
-          maxDD: Math.min(95, base.maxDD * (1.1 + rnd() * 0.9)),
-          nTrades: Math.max(1, Math.round(base.nTrades * (0.6 + rnd() * 0.8))),
+        const mk = (escala: number): Metrics => ({
+          ...(base ?? ({} as Metrics)),
+          netProfit: (base?.netProfit ?? 0) * escala,
+          profitFactor: Math.max(0.3, (base?.profitFactor ?? 1) * (0.8 + rnd() * 0.45)),
+          maxDD: Math.min(95, (base?.maxDD ?? 10) * (1.1 + rnd() * 0.9)),
+          nTrades: Math.max(1, Math.round((base?.nTrades ?? 10) * (0.6 + rnd() * 0.8))),
+        })
+        const ver = (m: Metrics): RetestMercado['verdict'] =>
+          m.profitFactor >= 1.15 && m.netProfit > 0 ? 'pass' : m.profitFactor >= 0.95 ? 'warn' : 'fail'
+        const mercados: RetestMercado[] = symbolIds.map(sid => {
+          const conDatos = db.dataFiles.some(d =>
+            d.symbolId === sid && d.timeframe === timeframe && d.status === 'ready')
+          if (!conDatos) {
+            return { symbolId: sid, simbolo: db.symbols.find(s => s.id === sid)?.name ?? `#${sid}`,
+              verdict: 'sin datos' as const, nota: 'sin datos en este mercado', retest: null }
+          }
+          const m = mk(0.55 + rnd() * 0.8)
+          return { symbolId: sid, simbolo: db.symbols.find(s => s.id === sid)?.name ?? `#${sid}`,
+            verdict: ver(m), nota: '', retest: m }
+        })
+        const conDatos = mercados.filter(x => x.verdict !== 'sin datos')
+        const pass = conDatos.filter(x => x.verdict === 'pass').length
+        const fail = conDatos.filter(x => x.verdict === 'fail').length
+        const warn = conDatos.filter(x => x.verdict === 'warn').length
+        const resumen: RetestResumen = conDatos.length === 0
+          ? { verdict: 'pending', detalle: 'ningun mercado con datos', mercadosConDatos: 0, pass: 0, warn: 0, fail: 0 }
+          : fail === 0 && warn === 0
+            ? { verdict: 'pass', detalle: `sobrevive en ${pass} de ${conDatos.length}`, mercadosConDatos: conDatos.length, pass, warn, fail }
+            : pass > 0
+              ? { verdict: 'warn', detalle: `sobrevive en ${pass} de ${conDatos.length}`, mercadosConDatos: conDatos.length, pass, warn, fail }
+              : { verdict: 'fail', detalle: `falla en ${fail + warn} de ${conDatos.length}`, mercadosConDatos: conDatos.length, pass, warn, fail }
+        return {
+          strategyId: id,
+          origen: { strategyId: id, original: base ?? null, retest: base ?? null, verdict: 'pass' as const },
+          mercados,
+          resumen,
         }
-        const verdict: RetestRow['verdict'] = retest.profitFactor >= 1.15 && retest.netProfit > 0 ? 'pass'
-          : retest.profitFactor >= 0.95 ? 'warn' : 'fail'
-        return { strategyId: id, original: base, retest, verdict }
       }),
     }
   },
@@ -853,10 +886,38 @@ export interface RetestRow {
   retest: Metrics | null
   verdict: 'pass' | 'warn' | 'fail'
 }
-export interface RetestResult {
+export interface RetestMercado {
   symbolId: number
+  simbolo: string
+  /** pass | warn | fail | sin datos */
+  verdict: 'pass' | 'warn' | 'fail' | 'sin datos'
+  nota: string
+  retest: Metrics | null
+  nBars?: number
+}
+
+export interface RetestResumen {
+  verdict: 'pass' | 'warn' | 'fail' | 'pending'
+  detalle: string
+  mercadosConDatos: number
+  pass: number
+  warn: number
+  fail: number
+}
+
+export interface RetestFila {
+  strategyId: number
+  /** out-of-sample dentro de su propio mercado */
+  origen: RetestRow
+  /** la misma regla en cada mercado destino */
+  mercados: RetestMercado[]
+  resumen: RetestResumen
+}
+
+export interface RetestResult {
   timeframe: string
-  rows: RetestRow[]
+  mercados: Array<{ symbolId: number; simbolo: string; conDatos: boolean }>
+  rows: RetestFila[]
 }
 export interface ImproverResult {
   strategyId: number

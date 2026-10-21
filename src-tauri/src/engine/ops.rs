@@ -659,6 +659,66 @@ pub fn spp(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String> {
     Ok(json!({ "results": results, "overall": overall }))
 }
 
+
+/// Retesteo de la MISMA regla en OTRO mercado.
+///
+/// `bars` son los datos del mercado de destino (otro simbolo y/o temporalidad).
+/// `None` en `verdict` no se usa: si el mercado no tiene datos, quien llama lo
+/// marca como "sin datos" — que no es lo mismo que un fallo.
+pub fn retest_on_market(
+    bars: &[Bar],
+    tmpl: Template,
+    params: [f64; 3],
+    cfg: &EngineCfg,
+) -> Result<Value, String> {
+    if bars.len() < 200 {
+        return Err(format!("dataset demasiado corto ({} barras)", bars.len()));
+    }
+    let out = backtest::run(bars, tmpl, params, cfg);
+    let m = &out.metrics;
+    let (verdict, nota) = if m.n_trades == 0 {
+        ("fail", "la regla no se activa en este mercado".to_string())
+    } else if m.profit_factor >= 1.15 && m.net_profit > 0.0 {
+        ("pass", String::new())
+    } else if m.profit_factor >= 0.95 {
+        ("warn", "apenas positivo".to_string())
+    } else {
+        ("fail", "pierde dinero aqui".to_string())
+    };
+    Ok(json!({
+        "retest": metrics_json(m),
+        "verdict": verdict,
+        "nota": nota,
+        "nBars": bars.len(),
+    }))
+}
+
+/// Veredicto global de una estrategia en varios mercados.
+/// `mercados` = [(nombre, veredicto)] con "sin datos" excluido del computo.
+pub fn verdict_mercados(mercados: &[(String, String)]) -> Value {
+    let con_datos: Vec<&(String, String)> = mercados.iter().filter(|(_, v)| v != "sin datos").collect();
+    let pass = con_datos.iter().filter(|(_, v)| v.as_str() == "pass").count();
+    let fail = con_datos.iter().filter(|(_, v)| v.as_str() == "fail").count();
+    let warn = con_datos.iter().filter(|(_, v)| v.as_str() == "warn").count();
+    let (verdict, detalle) = if con_datos.is_empty() {
+        ("pending", "ningun mercado con datos".to_string())
+    } else if fail == 0 && warn == 0 {
+        ("pass", format!("sobrevive en {pass} de {}", con_datos.len()))
+    } else if pass > 0 {
+        ("warn", format!("sobrevive en {pass} de {}", con_datos.len()))
+    } else {
+        ("fail", format!("falla en {} de {}", fail + warn, con_datos.len()))
+    };
+    json!({
+        "verdict": verdict,
+        "detalle": detalle,
+        "mercadosConDatos": con_datos.len(),
+        "pass": pass,
+        "warn": warn,
+        "fail": fail,
+    })
+}
+
 // ── improver: variantes reales de cfg/params evaluadas ──────────────
 
 /// Variantes de mejora con re-ejecución real del motor: cambios de stop/target
@@ -890,6 +950,55 @@ mod tests {
         let trades: Vec<Trade> = Vec::new();
         // sin operaciones cae al 40 % por defecto
         assert!((oos_frac_of(&bars, &trades) - 0.4).abs() < 1e-9);
+    }
+
+
+    /// Retesteo en otro mercado: la MISMA regla, otros datos.
+    #[test]
+    fn retest_en_otro_mercado_devuelve_metricas_y_veredicto() {
+        let cfg = EngineCfg::default();
+        let barras = serie_con_ciclos(600);
+        let r = retest_on_market(&barras, Template::MaCross, [20.0, 50.0, 0.0], &cfg)
+            .expect("el retesteo en otro mercado debe funcionar");
+        assert!(r["verdict"].is_string());
+        let m = &r["retest"];
+        assert!(m["netProfit"].is_number());
+        assert!(m["profitFactor"].is_number());
+        assert_eq!(r["nBars"], 600);
+    }
+
+    /// Un mercado con muy pocos datos es un error claro, no un veredicto falso.
+    #[test]
+    fn retest_con_dataset_minimo_da_error() {
+        let cfg = EngineCfg::default();
+        let err = retest_on_market(&serie_con_ciclos(50), Template::MaCross, [20.0, 50.0, 0.0], &cfg);
+        assert!(err.is_err());
+    }
+
+    /// El resumen por mercados: cuenta solo los que tienen datos.
+    #[test]
+    fn el_resumen_cuenta_solo_los_mercados_con_datos() {
+        let mercados = vec![
+            ("EURUSD".to_string(), "pass".to_string()),
+            ("GBPUSD".to_string(), "fail".to_string()),
+            ("USDJPY".to_string(), "sin datos".to_string()),
+        ];
+        let r = verdict_mercados(&mercados);
+        assert_eq!(r["mercadosConDatos"], 2);
+        assert_eq!(r["pass"], 1);
+        assert_eq!(r["fail"], 1);
+        // uno pasa y otro falla: ni pasa ni falla del todo -> alerta
+        assert_eq!(r["verdict"], "warn");
+        assert!(r["detalle"].as_str().unwrap().contains("1 de 2"));
+    }
+
+    /// Si ningun mercado tiene datos, el veredicto queda pendiente (no fallido).
+    #[test]
+    fn sin_mercados_con_datos_el_veredicto_queda_pendiente() {
+        let mercados = vec![("EURUSD".to_string(), "sin datos".to_string())];
+        let r = verdict_mercados(&mercados);
+        assert_eq!(r["verdict"], "pending");
+        assert_eq!(r["mercadosConDatos"], 0);
     }
 
     #[test]

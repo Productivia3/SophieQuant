@@ -33,23 +33,32 @@ export function S08Retester() {
   const [rows, setRows] = useState<StrategyRec[] | null>(null)
   const [symbols, setSymbols] = useState<SymbolRec[]>([])
   const [selIds, setSelIds] = useState<number[]>([])
-  const [symbolId, setSymbolId] = useState<number>(1)
+  const [symbolIds, setSymbolIds] = useState<number[]>([])
   const [timeframe, setTimeframe] = useState<Timeframe>('h1')
+  const [datasets, setDatasets] = useState<Awaited<ReturnType<typeof api.listDataFiles>>>([])
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<RetestResult | null>(null)
 
   useEffect(() => {
     api.listBank({}).then(rs => setRows(rs))
-    api.listSymbols().then(ss => { setSymbols(ss); setSymbolId(ss[0]?.id ?? 1) })
+    api.listSymbols().then(ss => { setSymbols(ss); setSymbolIds(ss[0] ? [ss[0].id] : []) })
+    api.listDataFiles().then(setDatasets)
   }, [])
 
   const toggle = (id: number) =>
     setSelIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
 
+  const toggleMercado = (id: number) =>
+    setSymbolIds(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id])
+
+  /** Ese simbolo tiene datos cargados para la temporalidad elegida. */
+  const tieneDatos = (id: number) =>
+    datasets.some(d => d.symbolId === id && d.timeframe === timeframe && d.status === 'ready')
+
   async function run() {
     if (!selIds.length) return
     setBusy(true); setResult(null)
-    const res = await api.runRetest(selIds, symbolId, timeframe)
+    const res = await api.runRetest(selIds, symbolIds, timeframe)
     setResult(res); setBusy(false)
   }
 
@@ -85,35 +94,53 @@ export function S08Retester() {
             )}
           </div>
           <div className="rounded-md border border-border bg-surface p-3">
-            <h2 className="mb-2 text-sm font-semibold text-muted">Mercado del retesteo</h2>
-            <label className="mb-2 block text-xs text-muted" htmlFor="ret-symbol">Símbolo</label>
-            <select id="ret-symbol" className={`w-full ${selectCls}`} value={symbolId}
-              onChange={e => setSymbolId(+e.target.value)}>
-              {symbols.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
-            <label className="mb-2 mt-3 block text-xs text-muted" htmlFor="ret-tf">Temporalidad</label>
+            <h2 className="mb-2 text-sm font-semibold text-muted">Mercados del retesteo</h2>
+            <label className="mb-2 block text-xs text-muted" htmlFor="ret-tf">Temporalidad</label>
             <select id="ret-tf" className={`w-full ${selectCls}`} value={timeframe}
               onChange={e => setTimeframe(e.target.value as Timeframe)}>
               {tfs.map(tf => <option key={tf} value={tf}>{tf}</option>)}
             </select>
+            <p className="mb-2 mt-3 text-xs text-muted">
+              Marca uno o varios mercados: la misma regla se prueba en cada uno.
+            </p>
+            <ul className="max-h-56 space-y-1 overflow-auto qf-scroll text-sm" aria-label="Mercados a retestear">
+              {symbols.map(s => (
+                <li key={s.id}>
+                  <label className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 hover:bg-surface-raised">
+                    <input type="checkbox" aria-label={`Retestear en ${s.name}`}
+                      checked={symbolIds.includes(s.id)} onChange={() => toggleMercado(s.id)} />
+                    <span className="flex-1 truncate">{s.name}</span>
+                    {tieneDatos(s.id)
+                      ? <span className="text-xs text-success">con datos</span>
+                      : <span className="text-xs text-muted">sin datos</span>}
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-muted">
+              Un mercado sin datos no cuenta como fallo: sale como «sin datos».
+            </p>
           </div>
         </div>
 
         <div className="min-w-0">
           {!result ? (
-            <EmptyState title="Sin retesteo todavía"
-              hint="Marca estrategias del banco, elige otro símbolo/timeframe y corre el retesteo para ver cómo se comportan fuera de su mercado de origen." />
+            <EmptyState title="Sin retesteo todavia"
+              hint="Marca estrategias del banco, elige uno o varios mercados y corre el retesteo: veras si la regla aguanta fuera de donde nacio." />
           ) : (
-            <div className="overflow-x-auto qf-scroll">
+              <div className="overflow-x-auto qf-scroll">
               <table className="w-full min-w-[760px] text-sm">
                 <thead>
                   <tr className="bg-surface text-left text-xs text-muted">
                     <th className="px-3 py-2 font-medium">Estrategia</th>
-                    <th className="px-3 py-2 font-medium">Original</th>
-                    <th className="px-3 py-2 font-medium">Retest</th>
-                    <th className="px-3 py-2 font-medium">PF</th>
-                    <th className="px-3 py-2 font-medium">DD</th>
-                    <th className="px-3 py-2 font-medium">Veredicto</th>
+                    <th className="px-3 py-2 font-medium">Origen (OOS 30 %)</th>
+                    {result.mercados.map(m => (
+                      <th key={m.symbolId} className="px-3 py-2 font-medium">
+                        {m.simbolo}
+                        {m.conDatos ? '' : <span className="ml-1 text-muted">(sin datos)</span>}
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 font-medium">Sobrevive</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -125,21 +152,37 @@ export function S08Retester() {
                           #{r.strategyId}
                         </Link>
                       </td>
-                      <td className="px-3 py-2 font-mono">{fmtMoney(r.original?.netProfit)}</td>
-                      <td className={`px-3 py-2 font-mono ${(r.retest?.netProfit ?? 0) >= 0 ? 'text-success' : 'text-danger'}`}>
-                        {fmtMoney(r.retest?.netProfit)}
-                      </td>
-                      <td className="px-3 py-2 font-mono">{fmtNum(r.retest?.profitFactor)}</td>
-                      <td className="px-3 py-2 font-mono">{fmtNum(r.retest?.maxDD, 1)}%</td>
                       <td className="px-3 py-2">
-                        <Badge tone={verdictTone(r.verdict)} label={verdictLabel(r.verdict)} />
+                        <Badge tone={verdictTone(r.origen.verdict)} label={verdictLabel(r.origen.verdict)} />
+                        <span className="ml-2 font-mono text-xs text-muted">
+                          PF {fmtNum(r.origen.retest?.profitFactor)} · DD {fmtNum(r.origen.retest?.maxDD, 1)}%
+                        </span>
+                      </td>
+                      {r.mercados.map(m => (
+                        <td key={m.symbolId} className="px-3 py-2">
+                          {m.verdict === 'sin datos'
+                            ? <span className="text-xs text-muted">sin datos</span>
+                            : (
+                              <>
+                                <Badge tone={verdictTone(m.verdict)} label={verdictLabel(m.verdict)} />
+                                <span className="ml-2 font-mono text-xs text-muted">
+                                  PF {fmtNum(m.retest?.profitFactor)}
+                                </span>
+                              </>
+                            )}
+                        </td>
+                      ))}
+                      <td className="px-3 py-2">
+                        <Badge tone={verdictTone(r.resumen.verdict === 'pending' ? 'fail' : r.resumen.verdict)}
+                          label={r.resumen.detalle} />
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <p className="mt-2 text-xs text-muted">
-                Mercado del retesteo: <b className="text-text">{symName(result.symbolId)} · {result.timeframe}</b>
+                Cada celda es la MISMA regla corrida en ese mercado. «Sobrevive» resume en cuantos
+                mercados aguanta la estrategia. Temporalidad: <b className="text-text">{result.timeframe}</b>.
               </p>
             </div>
           )}

@@ -10,8 +10,8 @@ Fecha: 20-10-2026 · Herramientas: `.claude/skills/replica-diff/parity.py` y
 
 | Métrica | Valor | Cómo se ha medido |
 | --- | --- | --- |
-| **Paridad de funcionalidades (todas)** | **59,2 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
-| **Paridad dentro del alcance que definiste** | **61,9 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
+| **Paridad de funcionalidades (todas)** | **60,5 / 100** | 51 funciones comparables del original; must=3, should=2, could=1; `partial` cuenta 0,5 |
+| **Paridad dentro del alcance que definiste** | **63,3 / 100** | idéntico, pero sin las 3 filas que decidiste aplazar (Dukascopy, Yahoo y licencias por tiers) |
 | Must-haves completos | **10 de 20** | |
 | Layout (pantalla Retesteo) | **17,8 / 100** | `imgdiff.py` en modo layout contra un recorte de la captura pública del original |
 
@@ -262,6 +262,38 @@ mínimo ejecutable en local:
   dependencias de Tauri 2.12 (comprobado: `cargo update -p glib --precise 0.20.0`
   falla). Queda registrado como riesgo aceptado en `src-tauri/audit.toml`, con el
   comando de referencia.
+
+
+### 7) Retesteo multi-mercado — **hecho**
+
+La primera ampliacion de la segunda iteracion. Antes de construirla aparecio un
+fallo que conviene contar: **el selector de simbolo y temporalidad del Retesteo
+era decorativo** — el comando `run_retest` los recibia y los ignoraba, y siempre
+retesteaba sobre el mismo dataset. Un control que no hace nada es una promesa
+que el producto no cumple.
+
+Ahora el retesteo hace las dos cosas que su nombre promete:
+
+- **Origen (OOS 30 %)**: la parte final de su propio dataset, como antes.
+- **La misma regla en otros mercados**: se eligen uno o varios simbolos y la
+  regla se corre en los datos de cada uno. Cada celda es un veredicto con su PF, y
+  la columna «Sobrevive» resume **en cuantos mercados aguanta** la estrategia
+  («sobrevive en 2 de 3»).
+- Un mercado **sin datos** sale como «sin datos», no como fallo: no es lo mismo
+  que no tener datos que perder dinero ahi. El panel de mercado dice de antemano
+  cuales tienen dataset para la temporalidad elegida.
+
+En el motor: `ops::retest_on_market` (corre la regla en otro mercado) y
+`ops::verdict_mercados` (el resumen). **4 tests de Rust** nuevos (retesteo en
+otro mercado, dataset minimo -> error, el resumen cuenta solo los mercados con
+datos, y sin mercados con datos el veredicto queda *pendiente* y no *fallido*) y
+**3 e2e** nuevos. Ademas se corrigio una incoherencia del fake (decía «sin
+datos» en el panel y aun asi enseñaba resultados).
+
+**Numeros**: la fila «Backtest multi-simbolo y multi-timeframe» pasa de `no` a
+`partial` (el retesteo es multi-mercado; el backtest principal sigue siendo de un
+simbolo y no hay charts de entrada concurrentes). Paridad de 59,2 a **60,5**
+(total) y de 61,9 a **63,3** (dentro del alcance).
 
 ---
 

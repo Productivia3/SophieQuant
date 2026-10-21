@@ -17,13 +17,15 @@ test.afterEach(async ({ page }) => {
 test.describe('F10 retest', () => {
   test('F10-H1 select strategies, run retest, table with verdicts', async ({ page }) => {
     await page.goto('/#/retester')
-    const boxes = page.getByRole('checkbox')
+    // la lista de estrategias se acota a su panel: el de mercados aparece antes
+    const lista = page.getByRole('list', { name: /estrategias/i })
+    const boxes = lista.getByRole('checkbox')
     await expect(boxes.first()).toBeVisible()
     await boxes.nth(0).check()
     await boxes.nth(1).check()
     await page.getByRole('button', { name: /retesteo de 2/i }).click()
     await expect(page.getByRole('table')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/mercado del retesteo:/i)).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: /sobrevive/i })).toBeVisible()
     const body = await page.locator('body').textContent()
     expect(body).not.toContain('NaN')
   })

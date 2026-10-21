@@ -4,7 +4,7 @@ Descarga de datos de acciones (Yahoo Finance integrado),data,should,yes,no,difer
 Importar/exportar datasets (CSV / tick / m1 / EOD),data,must,yes,partial,import CSV real (engine::datastore::import_csv) con selector nativo y export CSV/QFD real; sin tick ni EOD nativos
 Gestion de datasets: resample / checks de calidad / conversion,data,should,yes,partial,"checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
 Motor de backtesting con precision de tick,backtester,must,yes,partial,"motor real sobre barras (m1) con spread, comision y sin lookahead (21 tests); no hay tick"
-Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes),backtester,must,yes,no,"V1 long-only de un simbolo; el retesteo cambia de simbolo, no los mezcla"
+Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes),backtester,must,yes,partial,"el retesteo prueba la MISMA regla en varios mercados a la vez (multi-mercado: una columna por mercado, veredicto por mercado y resumen 'sobrevive en X de Y'); el backtest principal sigue siendo de un simbolo y no hay charts de entrada concurrentes"
 Metricas estandar completas (Net/Sharpe/DD/PF/trades/Z/R2),backtester,must,yes,yes,"net, gross, PF, win rate, maxDD, RDD, Sharpe, Sortino, Z, R2, trades, avg trade y WFE (engine::metrics)"
 Graficos equity / MAE-MFE / capital diario,backtester,should,yes,partial,curva de equity real en S06 y equity de cartera; sin MAE/MFE ni curva de capital diario
 Deteccion automatica de problemas de estrategia,backtester,should,yes,yes,escaner en el Laboratorio (S24) con problemas detectados por estrategia y avisos por metrica

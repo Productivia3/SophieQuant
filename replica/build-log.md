@@ -643,3 +643,30 @@ sin conexiones al puerto 1420. 88/88 e2e y 40/40 tests Rust.
   `src-tauri/target/release/bundle/msi/SophieQuant_0.1.0_x64_en-US.msi` (3,9 MB,
   con WiX descargado automaticamente). El script tambien lo puede instalar con
   `-Instalador <ruta.msi>`, que ademas deja entrada en el menu Inicio.
+
+---
+
+## Ampliacion 1: retesteo multi-mercado - 21-10-2026
+
+Primera ampliacion de la segunda iteracion (la mas pendiente segun el informe de
+paridad). Y de paso, un fallo que estaba escondido: **el selector de mercado del
+Retesteo no hacia nada** (el command recibia symbol_id y timeframe y los
+ignoraba). La UI prompia algo que el motor no cumplia.
+
+- **Motor**: `ops::retest_on_market` corre la MISMA regla sobre los datos de otro
+  mercado; `ops::verdict_mercados` resume en cuantos mercados aguanta la
+  estrategia. Un mercado sin datos es "sin datos", no un fallo.
+- **Command**: `run_retest` ahora recibe la lista de mercados, carga el dataset
+  de cada uno (QFN) y devuelve la matriz estrategia x mercado mas el resumen.
+- **UI**: panel con varios mercados (marca "con datos" / "sin datos" por symbolo y
+  temporalidad), tabla con una columna por mercado (veredicto + PF) y columna
+  "Sobrevive" con el recuento.
+- **Tests**: 4 de Rust + 3 e2e nuevos. Se corrigio tambien una carrera en los
+  tests: el panel de mercados aparece antes que la lista del banco, asi que
+  `getByRole('checkbox')` cogia un mercado en vez de una estrategia; ahora los
+  localizadores se acotan a cada lista.
+- **Fake coherente**: la disponibilidad de mercado del fake usa la misma regla que
+  el panel (antes decia "sin datos" y aun asi enseaba resultados).
+- **Numeros**: paridad de 59,2 a **60,5** (total) y de 61,9 a **63,3** (alcance).
+  La fila de backtest multi-simbolo pasa de `no` a `partial`.
+- **Verificacion**: 44/44 tests Rust, 91/91 e2e, build web OK.

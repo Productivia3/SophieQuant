@@ -712,25 +712,105 @@ pub fn save_strategy_logic(
 }
 
 #[tauri::command(async)]
-pub fn run_retest(state: State<AppState>, strategy_ids: Vec<i64>, symbol_id: i64, timeframe: String) -> Result<serde_json::Value, String> {
+pub fn run_retest(
+    state: State<AppState>,
+    strategy_ids: Vec<i64>,
+    symbol_ids: Vec<i64>,
+    timeframe: String,
+) -> Result<serde_json::Value, String> {
     let db = state.db.lock();
     let cfg = EngineCfg::default();
+
+    // datos de cada mercado destino (si no hay dataset, se marca "sin datos")
+    let mut mercados: Vec<(i64, String, Option<Vec<Bar>>)> = Vec::new();
+    for sid in &symbol_ids {
+        let path: Option<String> = db
+            .query_row(
+                "select file_path from data_files
+                 where symbol_id = ?1 and timeframe = ?2 and status = 'ready'
+                 order by n_bars desc limit 1",
+                q![sid, timeframe],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let nombre: String = db
+            .query_row("select name from symbols where id = ?1", q![sid], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?
+            .unwrap_or_else(|| format!("#{sid}"));
+        let bars = match path {
+            Some(p) => Qfn::read(std::path::Path::new(&p)).ok(),
+            None => None,
+        };
+        mercados.push((*sid, nombre, bars));
+    }
+
     let mut rows: Vec<serde_json::Value> = Vec::new();
     for id in strategy_ids {
         let orig = ops::stored_metrics(&db, id);
-        match load_core(&db, id).and_then(|c| ops::retest_one(&c, orig.as_ref(), &cfg)) {
-            Ok(mut v) => {
-                v["strategyId"] = id.into();
-                rows.push(v);
-            }
-            Err(e) => rows.push(serde_json::json!({
-                "strategyId": id, "original": orig.as_ref().map(ops::metrics_json),
+        let core = load_core(&db, id);
+
+        // 1) out-of-sample dentro de su propio mercado (lo de siempre)
+        let origen = match &core {
+            Ok(c) => match ops::retest_one(c, orig.as_ref(), &cfg) {
+                Ok(v) => v,
+                Err(e) => serde_json::json!({
+                    "original": orig.as_ref().map(ops::metrics_json),
+                    "retest": serde_json::Value::Null, "verdict": "fail", "note": e,
+                }),
+            },
+            Err(e) => serde_json::json!({
+                "original": orig.as_ref().map(ops::metrics_json),
                 "retest": serde_json::Value::Null, "verdict": "fail", "note": e,
-            })),
+            }),
+        };
+
+        // 2) la misma regla en cada mercado destino
+        let mut celdas: Vec<serde_json::Value> = Vec::new();
+        let mut veredictos: Vec<(String, String)> = Vec::new();
+        for (sid, nombre, bars) in &mercados {
+            let celda = match (core.as_ref(), bars) {
+                (Ok(c), Some(b)) => match ops::retest_on_market(b, c.template, c.params, &cfg) {
+                    Ok(v) => serde_json::json!({
+                        "symbolId": sid, "simbolo": nombre,
+                        "verdict": v["verdict"], "nota": v["nota"],
+                        "retest": v["retest"], "nBars": v["nBars"],
+                    }),
+                    Err(e) => serde_json::json!({
+                        "symbolId": sid, "simbolo": nombre, "verdict": "fail",
+                        "nota": e, "retest": serde_json::Value::Null,
+                    }),
+                },
+                (_, None) => serde_json::json!({
+                    "symbolId": sid, "simbolo": nombre, "verdict": "sin datos",
+                    "nota": format!("sin datos de {nombre} en {timeframe}"),
+                    "retest": serde_json::Value::Null,
+                }),
+                (Err(e), _) => serde_json::json!({
+                    "symbolId": sid, "simbolo": nombre, "verdict": "fail",
+                    "nota": e.to_string(), "retest": serde_json::Value::Null,
+                }),
+            };
+            veredictos.push((nombre.clone(), celda["verdict"].as_str().unwrap_or("fail").to_string()));
+            celdas.push(celda);
         }
+
+        rows.push(serde_json::json!({
+            "strategyId": id,
+            "origen": origen,
+            "mercados": celdas,
+            "resumen": ops::verdict_mercados(&veredictos),
+        }));
     }
     drop(db);
-    Ok(serde_json::json!({ "symbolId": symbol_id, "timeframe": timeframe, "rows": rows }))
+    Ok(serde_json::json!({
+        "timeframe": timeframe,
+        "mercados": mercados.iter().map(|(id, n, b)| serde_json::json!({
+            "symbolId": id, "simbolo": n, "conDatos": b.is_some(),
+        })).collect::<Vec<_>>(),
+        "rows": rows,
+    }))
 }
 
 #[tauri::command(async)]

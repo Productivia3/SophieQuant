@@ -1,6 +1,6 @@
 {
   "all": {
-    "feature_score": 59.2,
+    "feature_score": 60.5,
     "counted": 51,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -52,7 +52,7 @@
       },
       {
         "area": "backtester",
-        "score": 57.7,
+        "score": 69.2,
         "features": 5
       },
       {
@@ -101,8 +101,8 @@
         "feature": "Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes)",
         "area": "backtester",
         "priority": "must",
-        "clone": "no",
-        "notes": "V1 long-only de un simbolo; el retesteo cambia de simbolo, no los mezcla"
+        "clone": "partial",
+        "notes": "el retesteo prueba la MISMA regla en varios mercados a la vez (multi-mercado: una columna por mercado, veredicto por mercado y resumen 'sobrevive en X de Y'); el backtest principal sigue siendo de un simbolo y no hay charts de entrada concurrentes"
       },
       {
         "feature": "Motor de backtesting con precision de tick",
@@ -378,7 +378,7 @@
     "problems": []
   },
   "inscope": {
-    "feature_score": 61.9,
+    "feature_score": 63.3,
     "counted": 48,
     "must_have_done": 10,
     "must_have_total": 20,
@@ -419,14 +419,14 @@
         "features": 1
       },
       {
-        "area": "backtester",
-        "score": 57.7,
-        "features": 5
-      },
-      {
         "area": "data",
         "score": 64.3,
         "features": 3
+      },
+      {
+        "area": "backtester",
+        "score": 69.2,
+        "features": 5
       },
       {
         "area": "portfolio",
@@ -474,8 +474,8 @@
         "feature": "Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes)",
         "area": "backtester",
         "priority": "must",
-        "clone": "no",
-        "notes": "V1 long-only de un simbolo; el retesteo cambia de simbolo, no los mezcla"
+        "clone": "partial",
+        "notes": "el retesteo prueba la MISMA regla en varios mercados a la vez (multi-mercado: una columna por mercado, veredicto por mercado y resumen 'sobrevive en X de Y'); el backtest principal sigue siendo de un simbolo y no hay charts de entrada concurrentes"
       },
       {
         "feature": "Motor de backtesting con precision de tick",
