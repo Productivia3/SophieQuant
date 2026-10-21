@@ -633,3 +633,13 @@ tres textos que mentian segun el modo:
 **Verificado**: binario release recompilado, lanzado **desde el acceso directo**,
 captura de la ventana real (la interfaz se pinta entera, sin tocar localhost) y
 sin conexiones al puerto 1420. 88/88 e2e y 40/40 tests Rust.
+
+- **Acceso directo portable**: el `.lnk` apuntaba dentro del repositorio, asi que
+  un `cargo clean` lo dejaba muerto. Ahora el script copia el ejecutable a
+  `%LOCALAPPDATA%\Programs\SophieQuant\SophieQuant.exe` (copia estable) y el
+  acceso apunta ahi. Verificado: lanzado desde el acceso, la app pinta la
+  interfaz y **no abre ninguna conexion de red**.
+- **Instalador MSI generado**: `npm run tauri build` produce
+  `src-tauri/target/release/bundle/msi/SophieQuant_0.1.0_x64_en-US.msi` (3,9 MB,
+  con WiX descargado automaticamente). El script tambien lo puede instalar con
+  `-Instalador <ruta.msi>`, que ademas deja entrada en el menu Inicio.

@@ -98,11 +98,16 @@ servidor de desarrollo: sin el, el ejecutable arranca y muestra «no se puede
 conectar a localhost». `tauri dev` funciona porque arranca con
 `--no-default-features`.
 
-Acceso directo al Escritorio:
+Acceso directo al Escritorio (copia portable, sobrevive a un `cargo clean`):
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts\crear-acceso-directo.ps1
+# -> %LOCALAPPDATA%\Programs\SophieQuant\SophieQuant.exe
 ```
+
+Tambien hay instalador MSI generado en
+`src-tauri/target/release/bundle/msi/SophieQuant_0.1.0_x64_en-US.msi`
+(3,9 MB) y el script lo puede instalar: `-Instalador <ruta.msi>`.
 
 ## Tests
 
