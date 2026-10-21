@@ -711,6 +711,84 @@ pub fn save_strategy_logic(
     )
 }
 
+
+// ── Historial de analisis ─────────────────────────────────────────────
+//
+// Cada analisis deja registro con su veredicto y sus metricas, para poder
+// comparar el antes y el despues de cambiar una regla.
+
+/// Registra una corrida (si falla, no interrumpe el analisis: el historial es
+/// informativo, el resultado del comando es lo importante).
+fn record_run(
+    db: &Connection,
+    strategy_id: i64,
+    kind: &str,
+    verdict: &str,
+    label: &str,
+    metrics: serde_json::Value,
+    params: serde_json::Value,
+    detail: &serde_json::Value,
+) {
+    let _ = crate::engine::history::record(db, strategy_id, kind, verdict, label, &metrics, &params, detail);
+}
+
+/// Extrae un conjunto plano de metricas de un objeto de resultado.
+fn pick_metrics(src: &serde_json::Value, keys: &[&str]) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    for k in keys {
+        if let Some(v) = src.get(*k) {
+            out.insert((*k).to_string(), v.clone());
+        }
+    }
+    serde_json::Value::Object(out)
+}
+
+#[tauri::command]
+pub fn list_analysis_runs(
+    state: State<AppState>,
+    strategy_id: Option<i64>,
+    kind: Option<String>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.lock();
+    let lim = limit.unwrap_or(200).clamp(1, 1000);
+    let rows = crate::engine::history::list(&db, strategy_id, kind.as_deref(), lim)?;
+
+    // anade a cada fila el delta frente a la corrida anterior del mismo tipo
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for r in rows {
+        let sid = r["strategyId"].as_i64().unwrap_or(0);
+        let k = r["kind"].as_str().unwrap_or("");
+        let id = r["id"].as_i64().unwrap_or(0);
+        let mut row = r.clone();
+        match crate::engine::history::previous_of(&db, sid, k, id) {
+            Ok(Some(prev)) => {
+                let cmp = crate::engine::history::compare(&row, &serde_json::json!({ "metrics": prev }));
+                row["comparacion"] = cmp["metricas"].clone();
+                row["hayPrevia"] = serde_json::Value::Bool(true);
+            }
+            _ => {
+                row["comparacion"] = serde_json::Value::Array(vec![]);
+                row["hayPrevia"] = serde_json::Value::Bool(false);
+            }
+        }
+        out.push(row);
+    }
+    Ok(serde_json::json!({
+        "rows": out,
+        "kinds": crate::engine::history::KINDS
+            .iter()
+            .map(|k| serde_json::json!({ "key": k, "label": crate::engine::history::kind_label(k) }))
+            .collect::<Vec<_>>(),
+    }))
+}
+
+#[tauri::command]
+pub fn delete_analysis_run(state: State<AppState>, id: i64) -> Result<bool, String> {
+    let db = state.db.lock();
+    crate::engine::history::delete(&db, id)
+}
+
 #[tauri::command(async)]
 pub fn run_retest(
     state: State<AppState>,
@@ -796,11 +874,25 @@ pub fn run_retest(
             celdas.push(celda);
         }
 
+        let resumen = ops::verdict_mercados(&veredictos);
+        let m = pick_metrics(&origen["retest"], &["netProfit", "profitFactor", "maxDD", "nTrades"]);
+        let mut metricas = m.as_object().cloned().unwrap_or_default();
+        metricas.insert("mercados".into(), serde_json::json!(resumen["mercadosConDatos"]));
+        metricas.insert("sobrevive".into(), serde_json::json!(resumen["pass"]));
+        let mercados_nombre: Vec<String> = mercados.iter().map(|(_, n, _)| n.clone()).collect();
+        record_run(
+            &db, id, "retest",
+            resumen["verdict"].as_str().unwrap_or("pending"),
+            &format!("{} · {}", mercados_nombre.join(", "), timeframe),
+            serde_json::Value::Object(metricas),
+            serde_json::json!({ "simbolos": mercados_nombre, "timeframe": timeframe }),
+            &serde_json::json!({ "origen": origen, "mercados": celdas, "resumen": resumen }),
+        );
         rows.push(serde_json::json!({
             "strategyId": id,
             "origen": origen,
             "mercados": celdas,
-            "resumen": ops::verdict_mercados(&veredictos),
+            "resumen": resumen,
         }));
     }
     drop(db);
@@ -819,15 +911,51 @@ pub fn run_improver(state: State<AppState>, strategy_id: i64) -> Result<serde_js
     let core = load_core(&db, strategy_id)?;
     let mut v = ops::improver(&core, &EngineCfg::default())?;
     v["strategyId"] = strategy_id.into();
+    // historial: la mejor variante y cuanto mejora
+    let mejor = v["variants"]
+        .as_array()
+        .and_then(|vs| vs.iter().max_by(|a, b| {
+            a["improvement"].as_f64().unwrap_or(f64::MIN)
+                .partial_cmp(&b["improvement"].as_f64().unwrap_or(f64::MIN))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }))
+        .cloned();
+    let improvement = mejor.as_ref().and_then(|m| m["improvement"].as_f64()).unwrap_or(0.0);
+    let verdict = if improvement > 0.0 { "pass" } else { "warn" };
+    let metricas = pick_metrics(
+        mejor.as_ref().map(|m| &m["metrics"]).unwrap_or(&serde_json::Value::Null),
+        &["netProfit", "profitFactor", "maxDD", "nTrades"],
+    );
+    let mut metricas = metricas.as_object().cloned().unwrap_or_default();
+    metricas.insert("mejora".into(), serde_json::json!((improvement * 100.0).round() / 100.0));
+    record_run(
+        &db, strategy_id, "improver", verdict,
+        v["bestVariant"].as_str().unwrap_or("sin mejora"),
+        serde_json::Value::Object(metricas),
+        serde_json::json!({}),
+        &v,
+    );
     drop(db);
     Ok(v)
 }
 
 #[tauri::command(async)]
 pub fn run_optimizer(state: State<AppState>, strategy_id: i64, param_a: String, param_b: String, steps: i64, kind: String) -> Result<serde_json::Value, String> {
+    // (el registro del historial se anade al final de la funcion)
     let db = state.db.lock();
     let core = load_core(&db, strategy_id)?;
     let g = ops::run_grid(&core, &EngineCfg::default(), steps as usize, &kind)?;
+    // historial: la mejor combinacion de la rejilla
+    let best = g["best"].clone();
+    let pf = best["pf"].as_f64().unwrap_or(0.0);
+    let verdict = if pf >= 1.15 { "pass" } else if pf >= 0.95 { "warn" } else { "fail" };
+    record_run(
+        &db, strategy_id, "optimizer", verdict,
+        &format!("{} = {} · {} = {}", param_a, best["a"], param_b, best["b"]),
+        pick_metrics(&best, &["pf", "maxDD", "a", "b"]),
+        serde_json::json!({ "paramA": param_a, "paramB": param_b, "steps": steps, "kind": kind }),
+        &serde_json::json!({ "aValues": g["aValues"], "bValues": g["bValues"], "best": best }),
+    );
     drop(db);
     Ok(serde_json::json!({
         "strategyId": strategy_id, "kind": kind,
@@ -842,6 +970,17 @@ pub fn run_wfm(state: State<AppState>, strategy_id: i64, a: String, b: String, s
     let db = state.db.lock();
     let core = load_core(&db, strategy_id)?;
     let g = ops::run_grid(&core, &EngineCfg::default(), steps as usize, "wf")?;
+    // historial: la mejor celda de la matriz y su veredicto
+    let best = g["best"].clone();
+    let verdict = best["verdict"].as_str().unwrap_or("pending").to_string();
+    let metricas = pick_metrics(&best, &["wfe", "a", "b"]);
+    record_run(
+        &db, strategy_id, "wf_matrix", &verdict,
+        &format!("{} x {}", a, b),
+        metricas,
+        serde_json::json!({ "paramA": a, "paramB": b, "steps": steps }),
+        &serde_json::json!({ "aValues": g["aValues"], "bValues": g["bValues"], "best": best }),
+    );
     drop(db);
     Ok(serde_json::json!({
         "strategyId": strategy_id, "paramA": a, "paramB": b,
@@ -855,6 +994,19 @@ pub fn run_spp(state: State<AppState>, strategy_id: i64) -> Result<serde_json::V
     let core = load_core(&db, strategy_id)?;
     let mut v = ops::spp(&core, &EngineCfg::default())?;
     v["strategyId"] = strategy_id.into();
+    // historial: el impacto maximo de las permutaciones
+    let peor = v["results"]
+        .as_array()
+        .map(|rs| rs.iter().filter_map(|r| r["impactPct"].as_f64()).fold(0.0_f64, f64::max))
+        .unwrap_or(0.0);
+    let verdict = v["overall"].as_str().unwrap_or("pending");
+    record_run(
+        &db, strategy_id, "spp", verdict,
+        &format!("impacto maximo {peor:.1} %"),
+        serde_json::json!({ "impactoMax": (peor * 10.0).round() / 10.0 }),
+        serde_json::json!({}),
+        &v,
+    );
     drop(db);
     Ok(v)
 }
@@ -865,6 +1017,33 @@ pub fn run_mc_suite(state: State<AppState>, strategy_id: i64, tests: Vec<String>
     let core = load_core(&db, strategy_id)?;
     let mut v = ops::mc_suite(&core, &EngineCfg::default(), &tests, 100)?;
     v["strategyId"] = strategy_id.into();
+    // historial: cuantas pruebas se superaron y la tasa media
+    let res = v["results"].as_array().cloned().unwrap_or_default();
+    let total = res.len();
+    let pasadas = res.iter().filter(|r| r["passed"] == true).count();
+    let media = if total == 0 {
+        0.0
+    } else {
+        res.iter().filter_map(|r| r["passRate"].as_f64()).sum::<f64>() / total as f64
+    };
+    let verdict = if total > 0 && pasadas == total {
+        "pass"
+    } else if pasadas > 0 {
+        "warn"
+    } else {
+        "fail"
+    };
+    record_run(
+        &db, strategy_id, "monte_carlo", verdict,
+        &format!("{pasadas}/{total} pruebas superadas"),
+        serde_json::json!({
+            "pruebas": total,
+            "superadas": pasadas,
+            "tasaMedia": (media * 100.0).round() / 100.0,
+        }),
+        serde_json::json!({ "tests": tests }),
+        &v,
+    );
     drop(db);
     Ok(v)
 }
@@ -1088,10 +1267,29 @@ pub fn export_dataset(app: AppHandle, state: State<AppState>, data_file_id: i64,
 
 #[tauri::command(async)]
 pub fn run_opt_profile(state: State<AppState>, strategy_id: i64) -> Result<serde_json::Value, String> {
+    // (el registro del historial se anade al final de la funcion)
     let db = state.db.lock();
     let core = load_core(&db, strategy_id)?;
     let mut v = ops::opt_profile(&core, &EngineCfg::default())?;
     v["strategyId"] = strategy_id.into();
+    // historial: la forma del perfil y el mejor parametro
+    let shape = v["shape"].as_str().unwrap_or("puntual");
+    let verdict = match shape {
+        "meseta" => "pass",
+        "unimodal" => "warn",
+        _ => "fail",
+    };
+    record_run(
+        &db, strategy_id, "opt_profile", verdict,
+        &format!("{} · mejor {}", v["param"].as_str().unwrap_or("p1"), v["bestParam"]),
+        serde_json::json!({
+            "bestParam": v["bestParam"],
+            "stableFrom": v["stableFrom"],
+            "stableTo": v["stableTo"],
+        }),
+        serde_json::json!({}),
+        &v,
+    );
     drop(db);
     Ok(v)
 }

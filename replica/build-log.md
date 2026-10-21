@@ -670,3 +670,28 @@ ignoraba). La UI prompia algo que el motor no cumplia.
 - **Numeros**: paridad de 59,2 a **60,5** (total) y de 61,9 a **63,3** (alcance).
   La fila de backtest multi-simbolo pasa de `no` a `partial`.
 - **Verificacion**: 44/44 tests Rust, 91/91 e2e, build web OK.
+
+---
+
+## Ampliacion 2: historial de analisis - 21-10-2026
+
+Segunda ampliacion de la iteracion. Cierra el hueco que quedaba abierto desde el
+backend: los resultados de analisis se calculaban, se mostraban y se perdian al
+cerrar. Ahora quedan guardados y **comparables**.
+
+- **Motor**: nuevo modulo `engine/history.rs` con la tabla `analysis_runs`
+  (estrategia, tipo, veredicto, etiqueta, metricas, configuracion y detalle) y
+  las funciones `record`, `list`, `delete`, `compare` y `previous_of`.
+- **Siete analisis quedan registrados** al ejecutar sus comandos: retesteo,
+  refinador, optimizador, matriz WF, Monte Carlo, SPP y perfil de optimizacion.
+  El registro nunca interrumpe el analisis: si falla, el comando sigue.
+- **Comparacion con la anterior**: cada fila muestra el delta por metrica frente
+  a la corrida previa del mismo tipo y estrategia ("PF +0,15"); si no hay
+  previa, dice "primera corrida".
+- **Interfaz**: panel en el detalle de la estrategia y pestana "Historial" en el
+  Laboratorio (con filtro por tipo y borrado de entradas). Componente nuevo
+  `src/components/HistoryPanel.tsx`.
+- **Fake tambien registra**: el almacen en memoria del navegador permite probar
+  el flujo completo sin escritorio.
+- **Tests**: 5 de Rust nuevos (49 en total) + 3 e2e nuevos (94 en total).
+- **Cierra** el hueco 3 de `replica/backend.md`.

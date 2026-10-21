@@ -13,6 +13,7 @@ import { StatCard, StatRow } from '../components/StatCard'
 import { EmptyState } from '../components/EmptyState'
 import { EquityChart } from '../components/EquityChart'
 import { VerdictCard } from '../components/VerdictCard'
+import { HistoryPanel } from '../components/HistoryPanel'
 import { estadoTone, estadoTexto } from '../lib/verdicts'
 import type { StrategyVerdicts, MetricFilter, BuildMetric, RobustnessWeight } from '../lib/api'
 import { BuildLog } from '../components/BuildLog'
@@ -555,6 +556,8 @@ export function S05Strategy() {
           </div>
 
           <VerdictCard strategyIds={[s.id]} title="Veredictos de robustez de esta estrategia" />
+
+          <HistoryPanel strategyId={s.id} title="Historial de analisis de esta estrategia" />
         </div>
       )}
     </Page>

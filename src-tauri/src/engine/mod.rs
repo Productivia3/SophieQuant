@@ -10,3 +10,4 @@ pub mod rules;
 pub mod ops;
 pub mod verdicts;
 pub mod robust;
+pub mod history;

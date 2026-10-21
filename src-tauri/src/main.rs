@@ -64,6 +64,8 @@ fn main() {
             commands::get_strategy_verdicts,
             commands::compute_strategy_verdicts,
             commands::save_strategy_logic,
+            commands::list_analysis_runs,
+            commands::delete_analysis_run,
         ])
         .run(tauri::generate_context!())
         .expect("error al arrancar SophieQuant");

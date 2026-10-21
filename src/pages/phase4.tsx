@@ -15,6 +15,7 @@ import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
 import { VerdictCard } from '../components/VerdictCard'
+import { HistoryPanel } from '../components/HistoryPanel'
 import { TableSkeleton } from '../components/TableSkeleton'
 import { EquityChart } from '../components/EquityChart'
 import { StatCard, StatRow } from '../components/StatCard'
@@ -527,7 +528,7 @@ export function S23Settings() {
 
 /* ───────────────────── S24 · Laboratorio ───────────────────────── */
 
-type AnalyzerTab = 'resumen' | 'verdicts' | 'mc' | 'mm'
+type AnalyzerTab = 'resumen' | 'verdicts' | 'historial' | 'mc' | 'mm'
 
 export function S24Analyzer() {
   const [rows, setRows] = useState<StrategyRec[] | null>(null)
@@ -561,6 +562,7 @@ export function S24Analyzer() {
   const tabs: Array<{ key: AnalyzerTab; label: string }> = [
     { key: 'resumen', label: 'Resumen' },
     { key: 'verdicts', label: 'Veredictos' },
+    { key: 'historial', label: 'Historial' },
     { key: 'mc', label: 'Monte Carlo de cartera' },
     { key: 'mm', label: 'Gestión de capital' },
   ]
@@ -644,6 +646,10 @@ export function S24Analyzer() {
                 strategyIds={(rows ?? []).map(r => r.id)}
                 title="Veredictos de robustez por estrategia"
               />
+            )}
+
+            {tab === 'historial' && (
+              <HistoryPanel allowFilter title="Historial de analisis" />
             )}
 
             {tab === 'mc' && (

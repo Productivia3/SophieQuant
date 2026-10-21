@@ -77,10 +77,11 @@
    poder testearla: 2 tests de integracion con un CSV real de 500 barras.
 2. **downloadData (Dukascopy) diferido** por decisión del usuario (V1 = CSV
    propio o import; el fake simula la descarga con progreso en cámara lenta).
-3. **Builders de resultados de análisis no persisten** (retest/improver/
-   optimizer se calculan y muestran; no se registran filas en `backtest_runs`
-   con build_id). En la referencia logra comparativas históricas; decidir en
-   `/replica-entrepreneur` si es fuente de valor real.
+3. ~~**Builders de resultados de análisis no persisten**~~ — **cerrado**
+   (21-10): los siete análisis (retesteo, refinador, optimizador, matriz WF,
+   Monte Carlo, SPP y perfil) se registran en la tabla `analysis_runs` con su
+   veredicto y sus métricas, y el historial compara cada corrida con la
+   anterior del mismo tipo (módulo `engine/history.rs`).
 4. ~~`cargo fix` para limpiar warnings de codigo muerto (8) + `cargo audit`~~ —
    **cerrado** (21-10): los 6 avisos de `dead_code` se resolvieron de raiz (no
    con `allow`): dos helpers pasaron a usarse de verdad, tres se eliminaron y uno

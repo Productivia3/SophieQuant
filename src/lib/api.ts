@@ -124,6 +124,8 @@ const db = {
   templates: templatesSeed,
   builds: [] as BuildRec[],
   runs: strategiesSeed.map(s => s.lastRun) as BacktestRunRec[],
+  /** Historial de analisis (solo en el fake: en escritorio va en la base de datos). */
+  analysisRuns: [] as AnalysisRun[],
 }
 
 const delay = (ms = 220) => new Promise(r => setTimeout(r, ms))
@@ -326,6 +328,7 @@ export const api = {
     const r = await real<McSuiteResult['results']>('run_mc_suite', { strategyId, tests })
     if (r) return { strategyId, results: r }
     await delay(600)
+    // (el registro en el historial lo hace el metodo real; aqui solo el fake)
     const s = db.strategies.find(x => x.id === strategyId)
     const base = s?.lastRun?.metrics?.profitFactor ?? 1
     return {
@@ -448,6 +451,8 @@ export const api = {
             : pass > 0
               ? { verdict: 'warn', detalle: `sobrevive en ${pass} de ${conDatos.length}`, mercadosConDatos: conDatos.length, pass, warn, fail }
               : { verdict: 'fail', detalle: `falla en ${fail + warn} de ${conDatos.length}`, mercadosConDatos: conDatos.length, pass, warn, fail }
+        this._fakeAnalysis(id, 'retest', resumen.verdict, `mock · ${mercados.length} mercados`,
+          { ...(base ? { netProfit: base.netProfit, profitFactor: base.profitFactor, maxDD: base.maxDD } : {}) })
         return {
           strategyId: id,
           origen: { strategyId: id, original: base ?? null, retest: base ?? null, verdict: 'pass' as const },
@@ -479,6 +484,10 @@ export const api = {
     const original = base ?? null
     const best = variants.reduce((b, v) => ((v.improvement ?? -1) > (b?.improvement ?? -1) ? v : b), variants[0])
     const bestMetrics = best.metrics && original && best.metrics.netProfit > original.netProfit ? best.metrics : null
+    this._fakeAnalysis(strategyId, 'improver',
+      (best.improvement ?? 0) > 0 ? 'pass' : 'warn',
+      best.name,
+      bestMetrics ? { netProfit: bestMetrics.netProfit, profitFactor: bestMetrics.profitFactor, maxDD: bestMetrics.maxDD } : {})
     return { strategyId, original, variants, bestVariant: bestMetrics ? best.name : null }
   },
 
@@ -497,6 +506,10 @@ export const api = {
         return { a, b, pf: +pf.toFixed(2), maxDD: +(8 + rnd() * (stable ? 18 : 45)).toFixed(1) }
       }))
     const best = cells.reduce((m, c) => (c.pf > m.pf ? c : m), cells[0])
+    this._fakeAnalysis(strategyId, 'optimizer',
+      best.pf >= 1.15 ? 'pass' : best.pf >= 0.95 ? 'warn' : 'fail',
+      `${opts.paramA}=${best.a} · ${opts.paramB}=${best.b}`,
+      { pf: best.pf, maxDD: best.maxDD }, { ...opts })
     return { strategyId, kind: opts.kind, paramA: opts.paramA, paramB: opts.paramB, aValues, bValues, cells, best }
   },
 
@@ -518,7 +531,11 @@ export const api = {
       const impact = +(2 + rnd() * (strong ? 12 : 38)).toFixed(1)  // % de cambio del net
       return { ...t, impactPct: impact, verdict: impact < 10 ? ('pass' as const) : impact < 25 ? ('warn' as const) : ('fail' as const) }
     })
-    return { strategyId, results, overall: results.every(r => r.verdict !== 'fail') ? 'pass' : 'fail' }
+    const overall = results.every(r => r.verdict !== 'fail') ? 'pass' : 'fail'
+    const peor = results.reduce((m, r) => Math.max(m, r.impactPct), 0)
+    this._fakeAnalysis(strategyId, 'spp', overall, `impacto maximo ${peor.toFixed(1)} %`,
+      { impactoMax: Math.round(peor * 10) / 10 })
+    return { strategyId, results, overall }
   },
 
   async getCorrelationMatrix(strategyIds: number[]): Promise<CorrelationMatrix> {
@@ -613,10 +630,15 @@ export const api = {
     // meseta: rango de valores con net >= 80% del mejor
     const best = points[bestIdx].netProfit
     const ok = points.filter(p => p.netProfit >= best * 0.8).map(p => p.param)
+    const shape = strong ? (Math.max(...ok) - Math.min(...ok) >= values[1] * 4 ? 'meseta' : 'unimodal') : 'puntual'
+    this._fakeAnalysis(strategyId, 'opt_profile',
+      shape === 'meseta' ? 'pass' : shape === 'unimodal' ? 'warn' : 'fail',
+      `mejor ${points[bestIdx].param}`,
+      { bestParam: points[bestIdx].param, stableFrom: Math.min(...ok), stableTo: Math.max(...ok) })
     return {
       strategyId, param: 'p1 · periodo', points,
       stableFrom: Math.min(...ok), stableTo: Math.max(...ok),
-      shape: strong ? (Math.max(...ok) - Math.min(...ok) >= values[1] * 4 ? 'meseta' : 'unimodal') : 'puntual',
+      shape,
       bestParam: points[bestIdx].param,
     }
   },
@@ -747,6 +769,92 @@ export const api = {
       oosFrac: 0.4,
       nTrades: m?.nTrades ?? 0,
     }
+  },
+
+  /** Registra una entrada en el historial del fake (el escritorio usa la DB). */
+  _fakeAnalysis(
+    strategyId: number,
+    kind: string,
+    verdict: AnalysisRun['verdict'],
+    label: string,
+    metrics: Record<string, number | string | null>,
+    params: Record<string, unknown> = {},
+  ): void {
+    const nombres: Record<string, string> = {
+      retest: 'Retesteo', improver: 'Refinador', optimizer: 'Optimizador',
+      wf_matrix: 'Matriz WF', monte_carlo: 'Monte Carlo',
+      spp: 'Permutaciones (SPP)', opt_profile: 'Perfil de optimizacion',
+    }
+    db.analysisRuns.push({
+      id: db.analysisRuns.length + 1,
+      strategyId,
+      nombre: db.strategies.find(s => s.id === strategyId)?.name ?? `#${strategyId}`,
+      kind,
+      kindLabel: nombres[kind] ?? kind,
+      verdict,
+      label,
+      metrics,
+      params,
+      detail: null,
+      createdAt: Math.floor(Date.now() / 1000),
+      comparacion: [],
+      hayPrevia: false,
+    })
+  },
+
+  /**
+   * Historial de analisis. En escritorio sale de la base de datos; en el
+   * navegador, del almacen en memoria (para poder probar el flujo).
+   */
+  async listAnalysisRuns(
+    strategyId?: number,
+    kind?: string,
+    limit = 200,
+  ): Promise<{ rows: AnalysisRun[]; kinds: AnalysisKind[] }> {
+    const r = await real<{ rows: AnalysisRun[]; kinds: AnalysisKind[] }>(
+      'list_analysis_runs', { strategyId: strategyId ?? null, kind: kind ?? null, limit })
+    if (r?.rows) return r
+
+    await delay(120)
+    const kinds: AnalysisKind[] = [
+      { key: 'retest', label: 'Retesteo' },
+      { key: 'improver', label: 'Refinador' },
+      { key: 'optimizer', label: 'Optimizador' },
+      { key: 'wf_matrix', label: 'Matriz WF' },
+      { key: 'monte_carlo', label: 'Monte Carlo' },
+      { key: 'spp', label: 'Permutaciones (SPP)' },
+      { key: 'opt_profile', label: 'Perfil de optimizacion' },
+    ]
+    const todas = db.analysisRuns
+      .filter(r => strategyId == null || r.strategyId === strategyId)
+      .filter(r => !kind || r.kind === kind)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, limit)
+    const rows = todas.map(r => {
+      const previa = db.analysisRuns
+        .filter(x => x.strategyId === r.strategyId && x.kind === r.kind && x.id < r.id)
+        .sort((a, b) => b.id - a.id)[0]
+      const comparacion = previa
+        ? Object.keys(r.metrics)
+            .filter(k => typeof r.metrics[k] === 'number' && typeof previa.metrics[k] === 'number')
+            .map(k => ({
+              metrica: k,
+              antes: previa.metrics[k] as number,
+              despues: r.metrics[k] as number,
+              delta: Math.round(((r.metrics[k] as number) - (previa.metrics[k] as number)) * 100) / 100,
+            }))
+        : []
+      return { ...r, comparacion, hayPrevia: !!previa }
+    })
+    return { rows, kinds }
+  },
+
+  /** Borra una entrada del historial. */
+  async deleteAnalysisRun(id: number): Promise<boolean> {
+    const r = await real<boolean>('delete_analysis_run', { id })
+    if (r != null) return r
+    db.analysisRuns = db.analysisRuns.filter(x => x.id !== id)
+    return true
   },
 
   /** Metricas por las que se puede filtrar y pesos del score (los pide el motor). */
@@ -972,6 +1080,29 @@ export interface RobustnessWeight {
   key: string
   peso: number
   desc: string
+}
+
+// ── Historial de analisis ───────────────────────────────────────────
+export interface AnalysisRun {
+  id: number
+  strategyId: number
+  nombre: string
+  kind: string
+  kindLabel: string
+  verdict: 'pass' | 'warn' | 'fail' | 'pending' | 'running'
+  label: string
+  metrics: Record<string, number | string | null>
+  params: Record<string, unknown>
+  detail: unknown
+  createdAt: number
+  /** Delta frente a la corrida anterior del mismo tipo. */
+  comparacion: Array<{ metrica: string; antes: number; despues: number; delta: number }>
+  hayPrevia: boolean
+}
+
+export interface AnalysisKind {
+  key: string
+  label: string
 }
 
 // ── Veredictos consolidados (tarjeta de robustez) ────────────────────

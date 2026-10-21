@@ -295,6 +295,28 @@ datos» en el panel y aun asi enseñaba resultados).
 simbolo y no hay charts de entrada concurrentes). Paridad de 59,2 a **60,5**
 (total) y de 61,9 a **63,3** (dentro del alcance).
 
+
+### 8) Historial de análisis con comparación — **hecho**
+
+La segunda ampliación de la segunda iteración. Hasta ahora cada análisis se
+calculaba, se enseñaba y **se perdía al cerrar**: no había forma de responder a
+la pregunta que más importa cuando cambias una regla — *¿lo he mejorado o lo he
+roto?*
+
+- **Motor** (`engine/history.rs`): tabla `analysis_runs` con estrategia, tipo de
+  análisis, veredicto, etiqueta, métricas planas, configuración usada y el
+  resultado completo. Los **siete** análisis quedan registrados: retesteo,
+  refinador, optimizador, matriz WF, Monte Carlo, SPP y perfil de optimización.
+- **Comparación**: cada corrida se compara con la **anterior del mismo tipo y la
+  misma estrategia**, y la diferencia sale por métrica («PF +0,15»). Si no hay
+  corrida previa, lo dice: «primera corrida».
+- **Interfaz**: panel de historial en el **detalle de la estrategia** y pestaña
+  **«Historial»** en el Laboratorio, con filtro por tipo y opción de borrar
+  entradas.
+- **Tests**: 5 de Rust (registro y relectura, orden y filtros, comparación,
+  borrado y delta entre dos corridas) + 3 e2e. El fake también registra, para
+  que el flujo se pueda probar en el navegador.
+
 ---
 
 ## 5. Las cinco cosas que conviene construir ahora

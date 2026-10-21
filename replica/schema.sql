@@ -174,3 +174,21 @@ create table if not exists app_settings (
   key text primary key,
   value jsonb not null
 );
+
+-- Historial de analisis: cada retesteo, refinamiento, optimizacion, matriz WF,
+-- Monte Carlo, SPP o perfil queda registrado con su veredicto y sus metricas.
+-- Sirve para comparar el antes y el despues de cambiar una regla.
+create table if not exists analysis_runs (
+  id integer primary key autoincrement,
+  strategy_id integer not null references strategies(id) on delete cascade,
+  kind text not null check (kind in
+    ('retest','improver','optimizer','wf_matrix','monte_carlo','spp','opt_profile')),
+  verdict text not null default 'pending' check (verdict in ('pending','running','pass','warn','fail')),
+  label text not null default '',
+  metrics jsonb,                -- metricas planas del analisis (net, PF, DD...)
+  params jsonb not null default '{}',   -- configuracion usada (mercado, filtros, pasos...)
+  detail jsonb,                -- resultado completo del comando
+  created_at integer not null default (unixepoch())
+);
+create index if not exists idx_analysis_strategy on analysis_runs(strategy_id, kind, id desc);
+create index if not exists idx_analysis_kind on analysis_runs(kind, id desc);
