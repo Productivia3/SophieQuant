@@ -723,3 +723,28 @@ toma: si dos estrategias arriesgan distinto, repartir a partes iguales no es
   usan la paleta violeta/ambar/rojo.
 - **Tests**: 5 de Rust (equiponderado, inverso a volatilidad, paridad de riesgo,
   pesos personalizados, equity ponderada) + 2 e2e.
+
+---
+
+## Verificacion del export + diagnostico del import - 21-10-2026
+
+Cierra el P1 que propose la propia investigacion ("Aviso de verificacion de export
++ checklist documentado") y el bloque de calidad del import de CSV.
+
+- **Verificacion del export** (`engine/export.rs::verification`): al generar el EA
+  se muestran **los supuestos reales** (barras y no ticks; spread, slippage y
+  comision tal y como se correron; posicion y balance fijos; solo largo; sin
+  horarios; huecos rellenados) y una **checklist de 8 puntos** para comprobarlo
+  en MetaTrader. Los valores vienen de `backtest_runs.engine_cfg`, asi que no son
+  genericos: si cambias el spread, cambia el supuesto.
+- Documento completo en `replica/export-verificacion.md`, con lo que el export
+  **no** puede hacer (no es motor tick, no hay gestion de capital, no hay short).
+- **Diagnostico del import de CSV** (`engine/datastore.rs`): el importador ahora
+  comprueba el fichero y lo dice: filas descartadas, **huecos** (y el mayor),
+  barras **sin volumen**, **precios incoherentes** y **timestamps repetidos**. Un
+  fichero con huecos es la causa tipica de que el backtest sea mas optimista que el
+  broker; dicho al importar, deja de ser un misterio.
+- El import devuelve `{dataset, calidad}` y la UI muestra el panel de calidad.
+- **Tests**: 2 de Rust (fichero limpio y fichero con hueco/precio imposible/
+  volumen cero) + 2 e2e (el panel de verificacion y que el EA se siga pudiendo
+  guardar). Total: 55 Rust, 98 e2e.

@@ -114,11 +114,13 @@ pub fn list_data_files(state: State<AppState>) -> Result<Vec<DataFileRow>, Strin
 #[tauri::command]
 pub fn import_data_csv(
     app: AppHandle, state: State<AppState>, symbol_id: i64, timeframe: String, path: String,
-) -> Result<DataFileRow, String> {
+) -> Result<serde_json::Value, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).ok();
     let db = state.db.lock();
-    import_csv_registered(&db, &dir, symbol_id, &timeframe, std::path::Path::new(&path))
+    let (dataset, calidad) =
+        import_csv_registered(&db, &dir, symbol_id, &timeframe, std::path::Path::new(&path))?;
+    Ok(serde_json::json!({ "dataset": dataset, "calidad": calidad }))
 }
 
 /// Importa un CSV de mercado: lo lee, lo limpia, lo guarda como QFN y lo registra
@@ -131,7 +133,7 @@ pub fn import_csv_registered(
     symbol_id: i64,
     timeframe: &str,
     path: &std::path::Path,
-) -> Result<DataFileRow, String> {
+) -> Result<(DataFileRow, serde_json::Value), String> {
     let (bars, report) = datastore::import_csv(path)?;
     let file_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("dataset").to_string();
     let qfn_path = app_dir.join(format!("{file_name}_{timeframe}.qfn"));
@@ -148,12 +150,28 @@ pub fn import_csv_registered(
            report.n_bars, report.date_from, report.date_to, now_ts()],
     ).map_err(|e| e.to_string())?;
     let id = db.last_insert_rowid();
-    Ok(DataFileRow {
-        id, symbol_id, timeframe: timeframe.to_string(), storage_kind: "imported_csv".into(),
-        compressed_bytes: 0, n_bars: report.n_bars,
-        date_from: Some(report.date_from), date_to: Some(report.date_to),
-        status: "ready".into(), created_at: now_ts(),
-    })
+    let calidad = serde_json::json!({
+        "nBars": report.n_bars,
+        "skipped": report.skipped,
+        "dateFrom": report.date_from,
+        "dateTo": report.date_to,
+        "avisos": report.avisos,
+        "huecos": report.huecos,
+        "huecoMax": report.hueco_max,
+        "sinVolumen": report.sin_volumen,
+        "preciosIncoherentes": report.precios_incoherentes,
+        "timestampsRepetidos": report.timestamps_repetidos,
+        "limpio": report.avisos.len() == 1 && report.avisos[0].starts_with("sin avisos"),
+    });
+    Ok((
+        DataFileRow {
+            id, symbol_id, timeframe: timeframe.to_string(), storage_kind: "imported_csv".into(),
+            compressed_bytes: 0, n_bars: report.n_bars,
+            date_from: Some(report.date_from), date_to: Some(report.date_to),
+            status: "ready".into(), created_at: now_ts(),
+        },
+        calidad,
+    ))
 }
 
 #[tauri::command]
@@ -454,7 +472,11 @@ pub fn get_strategy(state: State<AppState>, id: i64) -> Result<Option<serde_json
 // ── export ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn export_strategy(state: State<AppState>, strategy_id: i64, platform: String) -> Result<String, String> {
+pub fn export_strategy(
+    state: State<AppState>,
+    strategy_id: i64,
+    platform: String,
+) -> Result<serde_json::Value, String> {
     let plat = Platform::from_str(&platform).ok_or("plataforma no soportada en V1")?;
     let db = state.db.lock();
     let (name, template_id, params_json): (String, Option<i64>, Option<String>) = db
@@ -469,6 +491,20 @@ pub fn export_strategy(state: State<AppState>, strategy_id: i64, platform: Strin
         .unwrap_or([20.0, 50.0, 0.0]);
     let tmpl = Template::from_id(template_id.unwrap_or(1)).unwrap_or(Template::MaCross);
     let code = export::strategy_code(plat, &name, tmpl, params);
+    // la configuracion real con la que se corrio el backtest: los supuestos del
+    // export tienen que ser los de verdad, no unos genericos
+    let cfg_raw: Option<String> = db
+        .query_row(
+            "select engine_cfg from backtest_runs where strategy_id = ?1 order by id desc limit 1",
+            q![strategy_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let cfg: EngineCfg = cfg_raw
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let verificacion = export::verification(tmpl, params, &cfg);
 
     let db2 = state.db.lock();
     db2.execute(
@@ -476,7 +512,8 @@ pub fn export_strategy(state: State<AppState>, strategy_id: i64, platform: Strin
         q![strategy_id, format!("{platform}"), format!("{name}.{platform}")],
     ).map_err(|e| e.to_string())?;
     drop(db2);
-    Ok(code)}
+    Ok(serde_json::json!({ "code": code, "verificacion": verificacion }))
+}
 
 // ── settings mínimos ─────────────────────────────────────────────────
 
@@ -1469,13 +1506,17 @@ mod tests {
         let csv = dir.join("eurusd.csv");
         std::fs::write(&csv, csv_de_ejemplo(500)).unwrap();
 
-        let row = import_csv_registered(&conn, &dir, sym, "m1", &csv).expect("la importacion debe funcionar");
+        let (row, calidad) = import_csv_registered(&conn, &dir, sym, "m1", &csv)
+            .expect("la importacion debe funcionar");
 
         assert_eq!(row.symbol_id, sym);
         assert_eq!(row.timeframe, "m1");
         assert_eq!(row.storage_kind, "imported_csv");
         assert_eq!(row.n_bars, 500, "debe registrar todas las barras");
         assert_eq!(row.status, "ready");
+        // el diagnostico dice que el fichero esta limpio
+        assert_eq!(calidad["limpio"], true);
+        assert_eq!(calidad["nBars"], 500);
 
         // el QFN queda escrito en disco
         let qfn = dir.join("eurusd_m1.qfn");
@@ -1493,6 +1534,56 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1);
         assert_eq!(kind, "imported_csv");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+
+    /// El diagnostico de calidad detecta huecos, volumen cero y precios imposibles.
+    #[test]
+    fn el_diagnostico_avisa_de_huecos_y_precios_incoherentes() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::engine::datastore::init_schema(&conn).unwrap();
+        conn.execute(
+            "insert into symbols (name, asset_class) values ('EURUSD', 'forex')",
+            [],
+        )
+        .unwrap();
+        let sym = conn.last_insert_rowid();
+
+        let dir = std::env::temp_dir().join(format!("qf_calidad_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let csv = dir.join("roto.csv");
+        // 210 filas, un hueco de una barra, un volumen cero y un close imposible
+        let mut s = String::from("time,open,high,low,close,volume\n");
+        for i in 0..210i64 {
+            if i == 120 { continue; }
+            let t = 1_700_000_000 + i * 60;
+            if i == 50 {
+                // precio imposible: se descarta
+                s.push_str(&format!("{t},1.1,1.2,1.0,9.9,100\n"));
+            } else if i == 60 {
+                // sin volumen: se acepta pero se avisa
+                s.push_str(&format!("{t},1.1,1.2,1.0,1.15,0\n"));
+            } else {
+                s.push_str(&format!("{t},1.1,1.2,1.0,1.15,100\n"));
+            }
+        }
+        std::fs::write(&csv, s).unwrap();
+
+        let (row, calidad) = import_csv_registered(&conn, &dir, sym, "m1", &csv).unwrap();
+        // 210 filas: se descarta la de precio imposible (209) y falta una por el hueco (208)
+        assert_eq!(row.n_bars, 208);
+        // el hueco se detecta comparando el paso esperado
+        assert_eq!(calidad["limpio"], false);
+        // la fila imposible se descarta y se avisa
+        assert!(calidad["skipped"].as_i64().unwrap() >= 1, "filas descartadas: {calidad}");
+        // el hueco se detecta
+        assert!(calidad["huecos"].as_i64().unwrap() >= 1, "huecos: {calidad}");
+        // y el volumen cero se avisa
+        assert!(calidad["sinVolumen"].as_i64().unwrap() >= 1);
+        let avisos = calidad["avisos"].as_array().unwrap();
+        assert!(avisos.len() >= 2, "avisos: {avisos:?}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }

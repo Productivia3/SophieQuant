@@ -15,6 +15,7 @@ import { Button } from '../components/Button'
 import { Badge } from '../components/Badge'
 import { EmptyState } from '../components/EmptyState'
 import { VerdictCard } from '../components/VerdictCard'
+import type { ImportQuality } from '../lib/api'
 import { HistoryPanel } from '../components/HistoryPanel'
 import type { WeightingModel } from '../lib/api'
 import { TableSkeleton } from '../components/TableSkeleton'
@@ -294,6 +295,7 @@ export function S21DataManager() {
   const [fmtSel, setFmtSel] = useState<'csv' | 'qfd'>('csv')
   const [importSymbol, setImportSymbol] = useState<number>(1)
   const [importTf, setImportTf] = useState<string>('m1')
+  const [calidad, setCalidad] = useState<ImportQuality | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -317,9 +319,11 @@ export function S21DataManager() {
         setBusy(false)
         return
       }
-      const df = await api.importDatasetFileFromPath(ruta, importSymbol, importTf)
-      setFiles(prev => [...(prev ?? []), df])
-      setNotice(`Importado ${ruta.split(/[\\/]/).pop()}: ${fmtNum(df.nBars, 0)} barras listas.`)
+      const { dataset, calidad } = await api.importDatasetFileFromPath(ruta, importSymbol, importTf)
+      setFiles(prev => [...(prev ?? []), dataset])
+      setFiles(prev => prev)
+      setCalidad(calidad)
+      setNotice(`Importado ${ruta.split(/[\\/]/).pop()}: ${fmtNum(dataset.nBars, 0)} barras listas.`)
     } catch (e) {
       setNotice(`No se pudo importar: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
@@ -390,6 +394,26 @@ export function S21DataManager() {
       {notice && (
         <p className="mx-4 mb-2 rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success"
           role="status">{notice}</p>
+      )}
+
+      {calidad && (
+        <section className="mx-4 mb-3 rounded-md border border-border bg-surface p-3">
+          <h2 className="mb-2 text-sm font-semibold text-muted">Calidad del fichero importado</h2>
+          <div className="mb-2 flex flex-wrap gap-3 text-xs text-muted">
+            <span><b className="text-text">{fmtNum(calidad.nBars, 0)}</b> barras</span>
+            <span><b className="text-text">{fmtNum(calidad.huecos, 0)}</b> huecos (mayor: {fmtNum(calidad.huecoMax, 0)})</span>
+            <span><b className="text-text">{fmtNum(calidad.skipped, 0)}</b> filas descartadas</span>
+            <span><b className="text-text">{fmtNum(calidad.sinVolumen, 0)}</b> sin volumen</span>
+            <span><b className="text-text">{fmtNum(calidad.preciosIncoherentes, 0)}</b> precios incoherentes</span>
+          </div>
+          <ul className="list-inside list-disc text-xs text-muted">
+            {calidad.avisos.map((a, i) => <li key={i}>{a}</li>)}
+          </ul>
+          <p className="mt-2 text-xs text-muted">
+            Los huecos y el volumen cero hacen que el backtest sea mas optimista que el real:
+            tenlo en cuenta al comparar con el broker.
+          </p>
+        </section>
       )}
 
       <div className="p-4">

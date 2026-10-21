@@ -593,12 +593,38 @@ export const api = {
   },
 
   // export
-  async exportStrategy(strategyId: number, platform: Platform): Promise<string> {
-    const r = await real<string>('export_strategy', { strategyId, platform })
-    if (r != null) return r
+  async exportStrategy(strategyId: number, platform: Platform): Promise<ExportResult> {
+    const r = await real<ExportResult>('export_strategy', { strategyId, platform })
+    if (r) return r
     await delay(300)
     const s = db.strategies.find(x => x.id === strategyId)
-    return genStubCode(platform, s?.name ?? 'strategy')
+    return {
+      code: genStubCode(platform, s?.name ?? 'strategy'),
+      verificacion: {
+        regla: 'Regla de ejemplo',
+        parametros: { p1: 20, p2: 50 },
+        supuestos: [
+          'Los datos son de BARRAS, no de ticks: dentro de la barra el EA ve un precio que el backtest no ve.',
+          'El backtest aplico 1.0 pips de spread, 0.5 de slippage y 0.00 por lote de comision; el broker puede aplicar otros.',
+          'El tamano de posicion fue fijo (0.1 lotes) y el balance inicial 10000 USD: no hay gestion de capital dinamica.',
+          'La version actual solo opera en largo (entra y sale), sin vender en corto.',
+          'No se aplicaron horarios ni filtros de sesion: la regla actua en todas las barras.',
+          'Si el dataset tenia huecos, el backtest los relleno de forma continua.',
+        ],
+        checklist: [
+          'Carga el EA en MT5 con los valores por defecto que trae el archivo.',
+          'Usa el MISMO simbolo y la MISMA temporalidad que en el backtest.',
+          'Comprueba el spread real del broker ahora y comparalo con el supuesto.',
+          'Comprueba si tu broker cobra comision por lote y ajustala en el input del EA.',
+          'Cuenta las operaciones: deben ser similares a las del backtest.',
+          'Mira el informe del tester de MT5 y compara el equity linea a linea.',
+          'Si el dataset tenia huecos, el backtest es mas optimista que el real.',
+          'El backtest es en largo y de posicion fija: no anadas gestion de capital al EA.',
+        ],
+        plataforma: 'MetaTrader 4/5',
+        documento: 'replica/export-verificacion.md',
+      },
+    }
   },
   async saveExportFile(fileName: string, code: string): Promise<boolean> {
     await delay(80) // en fake: solo confirma
@@ -774,9 +800,12 @@ export const api = {
   },
 
   /** Importa un CSV de verdad: el motor lo lee, lo limpia y lo guarda como QFN. */
-  async importDatasetFileFromPath(path: string, symbolId: number, timeframe: string): Promise<DataFileRec> {
-    const r = await realStrict<DataFileRec>('import_data_csv', { symbolId, timeframe, path })
-    if (!r) throw new Error('La importación real solo funciona en la app de escritorio.')
+  async importDatasetFileFromPath(
+    path: string, symbolId: number, timeframe: string,
+  ): Promise<{ dataset: DataFileRec; calidad: ImportQuality }> {
+    const r = await realStrict<{ dataset: DataFileRec; calidad: ImportQuality }>(
+      'import_data_csv', { symbolId, timeframe, path })
+    if (!r) throw new Error('La importacion real solo funciona en la app de escritorio.')
     return r
   },
 
@@ -1129,6 +1158,36 @@ export interface SavedStrategy {
   equity: number[]
   oosFrac: number
   nTrades: number
+}
+
+// ── Verificacion del export ─────────────────────────────────────────
+export interface ExportVerificacion {
+  regla: string
+  parametros: Record<string, number>
+  supuestos: string[]
+  checklist: string[]
+  plataforma: string
+  documento: string
+}
+
+export interface ExportResult {
+  code: string
+  verificacion: ExportVerificacion
+}
+
+// ── Diagnostico de calidad de un CSV importado ─────────────────────
+export interface ImportQuality {
+  nBars: number
+  skipped: number
+  dateFrom: number
+  dateTo: number
+  avisos: string[]
+  huecos: number
+  huecoMax: number
+  sinVolumen: number
+  preciosIncoherentes: number
+  timestampsRepetidos: number
+  limpio: boolean
 }
 
 // ── Filtros del generador (cualquier metrica del motor) ──────────────

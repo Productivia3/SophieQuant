@@ -1,7 +1,7 @@
 feature,area,priority,original,clone,notes
 Descarga integrada de datos forex/CFD (Dukascopy source),data,should,yes,no,diferido por decision del propietario (uso personal); el import CSV propio ya funciona
 Descarga de datos de acciones (Yahoo Finance integrado),data,should,yes,no,diferido: sin feeds externos ni red en el producto
-Importar/exportar datasets (CSV / tick / m1 / EOD),data,must,yes,partial,import CSV real (engine::datastore::import_csv) con selector nativo y export CSV/QFD real; sin tick ni EOD nativos
+Importar/exportar datasets (CSV / tick / m1 / EOD),data,must,yes,partial,"import CSV real (engine::datastore::import_csv) con selector nativo, export CSV/QFD real y DIAGNOSTICO de calidad (huecos, volumen cero, precios incoherentes, timestamps repetidos); sin tick ni EOD nativos"
 Gestion de datasets: resample / checks de calidad / conversion,data,should,yes,partial,"checks de calidad en la importacion (ruido, gaps, timestamps mezclados) con tests; sin resample ni conversion de formato"
 Motor de backtesting con precision de tick,backtester,must,yes,partial,"motor real sobre barras (m1) con spread, comision y sin lookahead (21 tests); no hay tick"
 Backtest multi-simbolo y multi-timeframe (charts de entrada concurrentes),backtester,must,yes,partial,"el retesteo prueba la MISMA regla en varios mercados a la vez (multi-mercado: una columna por mercado, veredicto por mercado y resumen 'sobrevive en X de Y'); el backtest principal sigue siendo de un simbolo y no hay charts de entrada concurrentes"
@@ -48,7 +48,7 @@ ATM - Advanced Trade Management (multiples salidas escaladas),portfolio,could,ye
 Laboratorio: dashboard de analisis profundo,analyzer,should,yes,yes,"S24 con resumen del banco, tabla, metricas y pestanas; motor Rust real (engine::ops)"
 Laboratorio: Monte Carlo de cartera,analyzer,could,yes,yes,S24 pestana MC de cartera con percentiles de equity final y probabilidad de rotura; motor Rust real
 Laboratorio: Money Management sim,analyzer,could,yes,partial,"S24 pestana MMC con riesgo por operacion y DD esperado; orientativa, no usa el motor Rust"
-Gestor de datos: suite de gestion de datos,data,should,yes,yes,"S21 con selector NATIVO de ficheros (tauri-plugin-dialog), simbolo y temporalidad de destino, import real via import_data_csv (limpia el CSV, guarda QFN y registra en data_files) y export csv/qfd; 2 tests de integracion con CSV real"
+Gestor de datos: suite de gestion de datos,data,should,yes,yes,"S21 con selector NATIVO de ficheros (tauri-plugin-dialog), simbolo y temporalidad de destino, import real via import_data_csv (limpia el CSV, guarda QFN, registra en data_files y devuelve el diagnostico de calidad) y export csv/qfd"
 Creditos IA / chat Q,ai,could,yes,skip,excluido por decision del propietario
 Market & Volume Profile,charts,could,yes,skip,excluido por decision del propietario
 SQ for Business / MQL Market publicacion,marketplace,could,yes,skip,"red de terceros, irreducible: uso personal, sin publicacion"
@@ -59,3 +59,5 @@ Tarjeta de veredictos consolidados por estrategia (walk-forward / Monte Carlo / 
 Marca de la zona out-of-sample en la curva de equity y en el grafico de velas,chart,could,no,yes,"PROPIO: el corte es el mismo que usa la comprobacion walk-forward, calculado en el motor y guardado con la corrida (oos_frac)"
 "Seleccion por robustez avanzada (score 0-100 con WFE, Monte Carlo, SPP y perfil)",builder,could,no,yes,"PROPIO: el generador ordena por un score explicable (35 % walk-forward, 30 % supervivencia MC, 20 % SPP, 15 % perfil) en vez de por beneficio; el build avisa de que filtro esta bloqueando"
 Historial de analisis con comparacion entre corridas (antes/despues de cambiar una regla),history,could,no,yes,"PROPIO: cada retesteo, refinamiento, optimizacion, matriz WF, Monte Carlo, SPP o perfil queda registrado con veredicto y metricas (tabla analysis_runs); el historial compara cada corrida con la anterior del mismo tipo"
+Verificacion del export: que ha asumido el backtest y checklist para MetaTrader,export,could,no,yes,"PROPIO: al generar el EA se muestran los supuestos reales (barras y no ticks, spread/comision del modelo, posicion fija, solo largo, sin horarios) y una checklist de 8 puntos para comprobar en MT5; documento en replica/export-verificacion.md"
+Diagnostico de calidad del dataset importado,data,could,no,yes,"PROPIO: el importador comprueba el fichero (huecos, volumen cero, precios incoherentes, timestamps repetidos) y lo dice: es lo que explica que el backtest sea mas optimista que el broker"

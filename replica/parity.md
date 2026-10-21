@@ -343,6 +343,30 @@ ahí**: las celdas del mapa de correlación usaban texto apagado sobre tinte
 mirarlas de cerca, esas celdas seguían usando **los azules anteriores al
 rebranding**: ahora usan la paleta violeta/ámbar/rojo de SophieQuant.
 
+
+### 10) Verificación del export y diagnóstico del import — **hecho**
+
+La queja más repetida sobre el producto de referencia es que **al exportar, los
+resultados no coinciden** («the results of the strategies do not match»). No suele
+ser un fallo del export: es que el backtest corre sobre barras con un modelo de
+costes propio y el broker corre con ticks y los suyos, y nadie dice dónde se
+difieren.
+
+- **Al generar el EA**, la app muestra **qué se ha asumido** (barras y no ticks;
+  el spread, slippage y comisión reales de la corrida; posición y balance fijos;
+  solo largo; sin horarios; huecos rellenados) y una **checklist de 8 puntos**
+  para comprobarlo en MetaTrader. Los valores salen de la configuración real de
+  la corrida, así que no son un texto genérico.
+- **Al importar un CSV**, el importador lo diagnostica: filas descartadas,
+  huecos (y el mayor), barras sin volumen, precios incoherentes y timestamps
+  repetidos. Un dataset con huecos es la causa típica de que el backtest sea más
+  optimista que el mercado real.
+- Documento: `replica/export-verificacion.md`.
+
+Esto no cierra la paridad de motor tick —que es otro bloque, carísimo— pero
+elimina la sorpresa: el usuario sabe **por qué** los números pueden diferir y
+tiene una lista para comprobarlo.
+
 ---
 
 ## 5. Las cinco cosas que conviene construir ahora

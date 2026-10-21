@@ -15,7 +15,7 @@ import { EquityChart } from '../components/EquityChart'
 import { VerdictCard } from '../components/VerdictCard'
 import { HistoryPanel } from '../components/HistoryPanel'
 import { estadoTone, estadoTexto } from '../lib/verdicts'
-import type { StrategyVerdicts, MetricFilter, BuildMetric, RobustnessWeight } from '../lib/api'
+import type { StrategyVerdicts, MetricFilter, BuildMetric, RobustnessWeight, ExportVerificacion } from '../lib/api'
 import { BuildLog } from '../components/BuildLog'
 import { fmtBytes, fmtDate, fmtMoney, fmtNum } from '../lib/utils'
 
@@ -652,6 +652,7 @@ export function S22Export() {
   const [sel, setSel] = useState<StrategyRec | null>(null)
   const [platform, setPlatform] = useState<Platform>('mql5')
   const [code, setCode] = useState<string | null>(null)
+  const [verif, setVerif] = useState<ExportVerificacion | null>(null)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
 
@@ -661,7 +662,7 @@ export function S22Export() {
     if (!sel) return
     setBusy(true); setCode(null); setSaved(false)
     const out = await api.exportStrategy(sel.id, platform)
-    setCode(out); setBusy(false)
+    setCode(out.code); setVerif(out.verificacion); setBusy(false)
   }
 
   return (
@@ -716,6 +717,30 @@ export function S22Export() {
           {code ? (
             <>
               <pre className="flex-1 overflow-auto qf-scroll rounded-md border border-border bg-surface p-3 font-mono text-xs text-muted">{code}</pre>
+              {verif && (
+                <div className="mt-3 rounded-md border border-border bg-surface p-3">
+                  <h3 className="mb-2 text-sm font-semibold text-muted">Verificacion antes de fiarte del EA</h3>
+                  <p className="mb-2 text-xs text-muted">
+                    Regla exportada: <b className="text-text">{verif.regla}</b>
+                    {Object.entries(verif.parametros).map(([k, v]) => (
+                      <span key={k} className="ml-2 font-mono text-muted">{k}={v}</span>
+                    ))}
+                  </p>
+
+                  <h4 className="mb-1 text-xs font-semibold text-muted">Lo que el backtest ha asumido</h4>
+                  <ul className="mb-3 list-inside list-disc text-xs text-muted">
+                    {verif.supuestos.map((s, i) => <li key={i}>{s}</li>)}
+                  </ul>
+
+                  <h4 className="mb-1 text-xs font-semibold text-muted">Checklist en MetaTrader</h4>
+                  <ol className="mb-2 list-inside list-decimal text-xs text-muted">
+                    {verif.checklist.map((c, i) => <li key={i}>{c}</li>)}
+                  </ol>
+                  <p className="text-xs text-muted">
+                    Documento completo: <span className="font-mono">{verif.documento}</span>
+                  </p>
+                </div>
+              )}
               <Button className="mt-2" variant="secondary"
                 onClick={async () => { await api.saveExportFile(`${sel!.name}.${platform}`, code); setSaved(true) }}>
                 <Download size={14} aria-hidden /> Guardar fichero…

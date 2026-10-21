@@ -3,6 +3,7 @@
 //! lógica del motor: MA cross, RSI reversión, ruptura ATR). Escrito desde cero.
 
 use super::engine::rules::Template;
+use crate::engine::types::EngineCfg;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Platform { Mql4, Mql5 }
@@ -19,6 +20,54 @@ impl Platform {
 }
 
 /// Genera el código fuente completo del EA. `name` es el nombre de la estrategia.
+
+/// Qué ha asumido este export y qué hay que comprobar en MetaTrader.
+///
+/// El problema que resuelve: el backtest corre sobre barras y con un modelo de
+/// costes propio; el broker corre con ticks y con sus propios costes. Si el
+/// usuario no sabe qué se asumio, el "los resultados no coinciden" aparece como
+/// un fallo del export en vez de como una diferencia de supuestos.
+pub fn verification(tmpl: Template, p: [f64; 3], cfg: &EngineCfg) -> serde_json::Value {
+    let mut params = serde_json::Map::new();
+    for (i, name) in tmpl.param_names().iter().enumerate() {
+        if *name != "-" {
+            params.insert((*name).to_string(), serde_json::json!(p[i]));
+        }
+    }
+    let supuestos = vec![
+        "Los datos son de BARRAS, no de ticks: dentro de la barra el EA ve un precio que el backtest no ve.".to_string(),
+        format!(
+            "El backtest aplico {} pips de spread, {} de slippage y {} por lote de comision; el broker puede aplicar otros.",
+            cfg.spread, cfg.slippage, cfg.commission_per_lot
+        ),
+        format!(
+            "El tamano de posicion fue fijo ({} lotes) y el balance inicial {} USD: no hay gestion de capital dinamica.",
+            cfg.fixed_lots, cfg.initial_balance
+        ),
+        "La version actual solo opera en largo (entra y sale), sin vender en corto.".to_string(),
+        "No se aplicaron horarios ni filtros de sesion: la regla actua en todas las barras.".to_string(),
+        "Si el dataset tenia huecos, el backtest los relleno de forma continua: el EA vera esos periodos como tiempo real.".to_string(),
+    ];
+    let checklist = vec![
+        "Carga el EA en MT5 con los valores por defecto que trae el archivo (no los cambies todavia).".to_string(),
+        "Usa el MISMO simbolo y la MISMA temporalidad que en el backtest.".to_string(),
+        "Comprueba el spread real del broker ahora y comparalo con el supuesto: si difiere mucho, el resultado cambiara.".to_string(),
+        "Comprueba si tu broker cobra comision por lote: si la cobra, ajustala en el input del EA antes de comparar.".to_string(),
+        "Cuenta las operaciones: deben ser similares a las del backtest. Si difieren mucho, la logica no esta bien portada.".to_string(),
+        "Mira el informe del tester de MT5 (informe de operaciones) y compara el equity linea a linea con el del backtest.".to_string(),
+        "Si el dataset tenia huecos o volumetricos raros, el backtest es mas optimista que el real: tenlo en cuenta.".to_string(),
+        "Recorda: el backtest es en largo y de posicion fija. Si en el EA anades gestion de capital, los numeros dejan de ser comparables.".to_string(),
+    ];
+    serde_json::json!({
+        "regla": tmpl.label(),
+        "parametros": serde_json::Value::Object(params),
+        "supuestos": supuestos,
+        "checklist": checklist,
+        "plataforma": "MetaTrader 4/5",
+        "documento": "replica/export-verificacion.md",
+    })
+}
+
 pub fn strategy_code(platform: Platform, name: &str, tmpl: Template, p: [f64; 3]) -> String {
     match platform {
         Platform::Mql4 => mql4(name, tmpl, p),

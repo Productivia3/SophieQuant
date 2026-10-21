@@ -83,6 +83,18 @@ pub struct ImportReport {
     pub skipped: i64,
     pub date_from: i64,
     pub date_to: i64,
+    /// Diagnostico de calidad del fichero: huecos, timestamps raro, precios imposibles.
+    pub avisos: Vec<String>,
+    /// Numero de huecos detectados (barras ausentes entre la primera y la ultima).
+    pub huecos: i64,
+    /// Mayor hueco consecutivo de barras.
+    pub hueco_max: i64,
+    /// Barras con volumen cero.
+    pub sin_volumen: i64,
+    /// Filas con OHLC incoherente (close fuera de [low, high] o high < low).
+    pub precios_incoherentes: i64,
+    /// Timestamps repetidos.
+    pub timestamps_repetidos: i64,
 }
 
 pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
@@ -124,9 +136,66 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
     if bars.len() < 2 {
         return Err(format!("CSV con solo {} barras útiles ({} descartadas)", bars.len(), skipped));
     }
+    // ── diagnostico de calidad ───────────────────────────────────────
+    // Se comprueba el fichero *antes* de darlo por bueno: huecos, timestamps
+    // repetidos, volumen cero y precios incoherentes. No aborta la importacion
+    // (los datos son utilizables) pero avisa de lo que puede explicar
+    // diferencias entre el backtest y lo que ves en el broker.
+    let mut huecos: i64 = 0;
+    let mut hueco_max: i64 = 0;
+    let mut sin_volumen: i64 = 0;
+    let mut precios_incoherentes: i64 = 0;
+    let mut timestamps_repetidos: i64 = 0;
+    let mut pasos: Vec<i64> = Vec::new();
+    for (i, b) in bars.iter().enumerate() {
+        if b.volume <= 0.0 { sin_volumen += 1; }
+        if b.high < b.low || b.close > b.high || b.close < b.low || b.open > b.high || b.open < b.low {
+            precios_incoherentes += 1;
+        }
+        if i > 0 {
+            let dt = b.time - bars[i - 1].time;
+            if dt == 0 { timestamps_repetidos += 1; }
+            else if dt > 0 {
+                // el paso esperado se deduce del primer intervalo util
+                let esperado = *pasos.first().unwrap_or(&dt);
+                if esperado > 0 && dt > esperado {
+                    let faltan = (dt / esperado) - 1;
+                    huecos += faltan;
+                    if faltan > hueco_max { hueco_max = faltan; }
+                }
+                if pasos.is_empty() { pasos.push(dt); }
+            }
+        }
+    }
+    let mut avisos: Vec<String> = Vec::new();
+    if skipped > 0 {
+        avisos.push(format!("{skipped} filas descartadas por estar mal formadas o tener datos invalidos"));
+    }
+    if timestamps_repetidos > 0 {
+        avisos.push(format!("{timestamps_repetidos} barras con el mismo timestamp"));
+    }
+    if precios_incoherentes > 0 {
+        avisos.push(format!("{precios_incoherentes} barras con precios incoherentes (close fuera de [low, high])"));
+    }
+    if hueco_max > 0 {
+        avisos.push(format!("huecos de datos: {huecos} barras ausentes (el mayor, {hueco_max} barras)"));
+    }
+    if sin_volumen > 0 {
+        avisos.push(format!("{sin_volumen} barras sin volumen"));
+    }
+    if avisos.is_empty() {
+        avisos.push("sin avisos: el fichero es limpio".to_string());
+    }
+
     let report = ImportReport {
         n_bars: bars.len() as i64,
         skipped,
+        avisos,
+        huecos,
+        hueco_max,
+        sin_volumen,
+        precios_incoherentes,
+        timestamps_repetidos,
         date_from: bars[0].time,
         date_to: bars[bars.len() - 1].time,
     };
