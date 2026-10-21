@@ -560,3 +560,37 @@ Las dos tareas de calidad que quedaban abiertas, cerradas.
   del alcance); must-haves **10 de 20**.
 - **Verificacion**: 40/40 tests Rust (2 nuevos de importacion), 88/88 e2e, build
   web OK, 0 avisos de compilacion, sweep de rebrand limpio, contraste 0 fallos.
+
+---
+
+## Acceso directo y publicacion en GitHub - 21-10-2026
+
+### Acceso directo al escritorio
+- Compilacion release completa (`cargo build --release`, 18 min por el LTO):
+  `src-tauri/target/release/sophiequant.exe`, 10,5 MB, con la interfaz web
+  embebida (sin servidor de desarrollo).
+- La app en release ahora declara `windows_subsystem = "windows"`: se abre sin
+  consola detras. Verificado leyendo el subsistema del PE (2 = GUI).
+- `scripts/crear-acceso-directo.ps1` crea el acceso en el Escritorio (con opcion
+  `-ModoDev` para el acceso que levanta `npm run tauri dev`). Ejecutado:
+  `C:\Users\jesus\OneDrive\Escritorio\SophieQuant.lnk` -> binario release,
+  icono propio, descripcion.
+- Probado de verdad: lanzado **desde el acceso directo**, la ventana "SophieQuant"
+  aparece y la app abre su base de datos local en
+  `%APPDATA%\com.sophiequant.app\sophiequant.db`.
+
+### Repositorio
+- `git init -b main` + remoto `origin` -> https://github.com/Productivia3/SophieQuant.git
+- `.gitignore`: ruido de compilacion (node_modules, target, dist, test-results),
+  **datos locales del usuario** (nunca se suben) y **material de terceros**:
+  los volcados literales de resenas (`replica/entrepreneur/raw-*.txt`,
+  `reviews.csv`) y las capturas de marketing del producto de referencia
+  (`replica/screens/ORIGINAL-*.png`). Se quedan en el disco local; el analisis
+  derivado si se sube.
+- `.gitattributes` (normalizacion LF) y `.editorconfig`.
+- `README.md` en espanol: que hace, el estado medido, como compilar y ejecutar,
+  el mapa del repositorio, privacidad (sin telemetria, sin cuentas, sin red) y la
+  procedencia clean-room.
+- Dos commits subidos: `5f4e959` (producto) y `352dad4` (preparacion).
+  130 ficheros en el remoto; verificado que no hay node_modules, target, dist
+  ni material de terceros.

@@ -9,7 +9,7 @@
 #   3. Datos locales: la base de datos y los datasets del usuario nunca salen
 #      de su equipo (es el principio del producto).
 # ─────────────────────────────────────────────────────────────────────────
-.claude/
+
 
 # ── Node / Vite / TypeScript ───────────────────────────────────────────
 node_modules/
