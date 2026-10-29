@@ -64,6 +64,25 @@ test.describe('X-H2 accesibilidad (axe) en pantallas reales', () => {
 })
 
 test.describe('X-otros', () => {
+  test('X-E2 teclado: el formulario de generación es alcanzable y editable sin ratón', async ({ page }) => {
+    await page.goto('/#/build/new')
+    const target = page.getByRole('spinbutton', { name: 'Estrategias objetivo' })
+    let focused = false
+    for (let i = 0; i < 80 && !focused; i++) {
+      await page.keyboard.press('Tab')
+      focused = await target.evaluate(element => document.activeElement === element)
+    }
+
+    expect(focused).toBe(true)
+    const visibleFocus = await target.evaluate(element => {
+      const style = getComputedStyle(element)
+      return style.outlineStyle !== 'none' && style.outlineColor !== 'rgba(0, 0, 0, 0)'
+    })
+    expect(visibleFocus).toBe(true)
+    await page.keyboard.press('ArrowUp')
+    await expect(target).toHaveValue('101')
+  })
+
   test('ruta desconocida muestra 404 propio y no crashea', async ({ page }) => {
     await page.goto('/#/no-existe')
     await expect(page.getByRole('heading', { name: /404|no encontrad/i })).toBeVisible()

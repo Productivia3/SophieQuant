@@ -3,6 +3,10 @@
 **Plataforma de escritorio para generar y validar estrategias de trading algorítmico.**
 Motor propio en Rust, interfaz en español, todo local: tus datos no salen de tu equipo.
 
+[**Guía de usuario en español**](./GUIA_DE_USUARIO.md) — instrucciones paso a paso
+para importar datos, generar y revisar estrategias y exportar a MetaTrader, sin
+conocimientos técnicos.
+
 SophieQuant nace de una pregunta incómoda: si una estrategia funciona porque el
 motor la encontró con mil intentos y no porque tenga lógica, ¿qué valor tiene?
 La respuesta de este producto es **enseñarte las pruebas**, no darte un botón
@@ -51,8 +55,8 @@ referencia:
 | --- | --- |
 | Paridad de funcionalidades | **65,8 / 100** (68,8 dentro del alcance definido) |
 | Must-haves completos | **10 de 20** |
-| Tests Rust | **40 / 40** |
-| Tests end-to-end + accesibilidad (axe) | **88 / 88** |
+| Tests Rust | **74 / 74** |
+| Tests end-to-end + accesibilidad (axe) | **106 / 106** |
 | `cargo audit` | **0 vulnerabilidades** |
 
 Lo que **no** está: más tipos de entrada/salida, más indicadores (MACD, CCI),

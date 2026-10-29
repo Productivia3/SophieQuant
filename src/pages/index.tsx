@@ -602,9 +602,12 @@ export function S05Strategy() {
             <StatCard label="Trades" value={m?.nTrades ?? 0} />
           </StatRow>
 
-          {(s.problems?.length ?? 0) > 0 && (
+          {(s.status === 'dirty' || (s.problems?.length ?? 0) > 0) && (
             <div className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger" role="alert">
-              <b>Detección automática:</b> {s.problems.join(', ')}
+              <b>{s.status === 'dirty' ? 'Estrategia marcada para revisión.' : 'Detección automática:'}</b>{' '}
+              {s.problems?.length
+                ? s.problems.join(', ')
+                : 'Revisa las métricas y vuelve a ejecutar el backtest antes de usarla.'}
             </div>
           )}
 

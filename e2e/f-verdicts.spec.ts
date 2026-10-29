@@ -59,4 +59,10 @@ test.describe('Zona out-of-sample', () => {
     await expect(page.locator('svg[role="img"]').first()).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText(/zona sombreada es fuera de muestra/i)).toBeVisible()
   })
+
+  test('Z-H3 la matriz no afirma una muestra suficiente con datos fake', async ({ page }) => {
+    await page.goto('/#/wfmatrix')
+    await page.getByRole('button', { name: /correr matriz/i }).click()
+    await expect(page.getByText(/poca data OOS: <30 trades o <1 año/i)).toBeVisible({ timeout: 10_000 })
+  })
 })

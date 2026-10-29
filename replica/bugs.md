@@ -1,8 +1,8 @@
 # Bugs — QuantForge
 
-Build: sin commit · Date: 2026-10-20 · Env: local capa fake, Playwright sobre http://localhost:1420, Chromium 156 (Chrome for Testing)
+Verificación local: 2026-10-29 · Entorno: Windows, Playwright con Chromium y capa fake; motor Rust local.
 
-Suíte: 40 casos automatizados (e2e/f-core, e2e/f08-export, e2e/x-transversal) + axe. Resultado final de la pasada: **39 ✓ / 1 ✘ (BUG-005, S3 documentado en test)**.
+Suite completa: Playwright + axe y tests Rust; el recuento final figura en `test-plan.md`.
 
 ### BUG-001: Progressbar sin nombre accesible
 
@@ -58,7 +58,7 @@ Status: **fixed in test** — scoped a `p` del aviso. Test pasa.
 - Flow / case: transversal / X-H1b
 - Screen: S04, S20
 - Steps: viewport 420px → /#/bank → scrollWidth 435 > 420
-- Status: **fixed** — tablas envueltas en `div.overflow-x-auto` (S04 y S20). La parte restante es BUG-005.
+- Status: **fixed** — tablas envueltas en `div.overflow-x-auto` (S04 y S20).
 
 ### BUG-005: sidebar fija de 224px no colapsa en pantallas ≤700px
 
@@ -78,14 +78,7 @@ Suspected cause: shell sin breakpoints responsive
 Status: **fixed (Fase 4)** — drawer fijo desplazado fuera de pantalla con hamburguesa
 (`data-testid="nav-burger"`), overlay clicable con `aria-label="Cerrar menú"`, `aria-expanded`
 en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe móvil 0 violaciones
-+ X-H1b actualizado (scrollWidth ≤ 420). Suite completa: **77/77 ✓**.
-
-### To check (no reproducido todavía — requiere núcleo Rust o Fase 3)
-
-- F01: que un build con Monte Carlo integrado filtre de verdad al guardar (requiere engine).
-- F09: importer CSV con timestamps ISO, filas basura y gaps (commands reales no compilados aún).
-- S08 retest, S09-S10 optimizaciones, S16 canvas drag&drop, S18 correlación: pantallas stub — se testean al construirse.
-- Determinismo del generador genético y golden-file MQL4/5 (unit tests de Rust, tras `cargo check`).
++ X-H1b actualizado (scrollWidth ≤ 420). Verificado de nuevo en la suite completa.
 
 ### BUG-006 – Parseo de timestamps ISO roto en el importador Rust (hallado por los tests QA)
 
@@ -97,5 +90,83 @@ en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe m�
   abortaban todo el import) y las cabeceras `time,open,...` se ignoran sin contar como ruido; y las
   barras se ordenan por tiempo tras importar (prerrequisito del motor, nadie lo hacía).
 - Bonus QA: `Platform::from_str` ahora acepta `MT4/MT5` en cualquier capitalización (era case-sensitive).
-- Status: **fixed** – 14/14 unit tests Rust en verde (importer ruido/gaps, QFN roundtrip, no-lookahead,
+- Status: **fixed** – tests Rust en verde (importer ruido/gaps, QFN roundtrip, no-lookahead,
   determinismo del backtest y del genético, golden mínimo MQL4/5).
+
+### BUG-007: veredictos de muestra WF se calculaban con proxies incorrectos
+
+- Severity: S2 (podía presentar como suficiente una muestra OOS insuficiente).
+- Flow / case: matriz walk-forward, item de mínimo de muestra y parada.
+- Expected: contar los trades OOS, medir la duración real del tramo y comparar el drawdown OOS con el peak IS.
+- Actual: se infería el número de trades a partir del profit factor, se asignaba un año a cualquier muestra no vacía y se comparaba `maxDD` contra `0.8`.
+- Status: **fixed** — la matriz reejecuta la mejor celda con la configuración del símbolo; los flags salen de trades, fechas y equity. Tests de umbrales en Rust y aviso explícito en la capa fake.
+
+### BUG-008: estrategias marcadas dirty sin detalle no avisaban en resultados
+
+- Severity: S3 (estado visible en el banco, pero no explicado al abrir la estrategia).
+- Flow / case: F02-E1, estrategia 3 de la semilla fake.
+- Expected: un aviso de revisión también cuando `status=dirty` y no hay mensajes en `problems`.
+- Actual: el detalle solo mostraba aviso si `problems` contenía elementos.
+- Status: **fixed** — el detalle muestra un aviso y una acción recomendada; e2e F02-E1 pasa.
+
+### BUG-009: controles de formulario sin indicador visible de foco por teclado
+
+- Severity: S2 (problema de accesibilidad por teclado).
+- Flow / case: X-E2, formulario de generación S02.
+- Expected: foco visible al recorrer y operar el formulario con Tab y flechas.
+- Actual: el control recibía foco pero no tenía un estilo de foco global definido.
+- Status: **fixed** — `:focus-visible` aplica un contorno acentuado; e2e comprueba alcance, edición y foco visible.
+
+### BUG-010: JSX inválido en cambios locales de Phase 2 bloqueaba el build
+
+- Severity: S2 (la aplicación web no compilaba).
+- Flow / case: build de producción.
+- Expected: TypeScript y Vite compilan.
+- Actual: cierres de expresiones JSX y sintaxis del editor estaban malformados.
+- Status: **fixed** — estructura reparada y `npm run build` en verde.
+
+### BUG-011: el Banco fallaba al listar estrategias en Tauri
+
+- Severity: S2 (pantalla principal de resultados bloqueada en escritorio).
+- Flow / case: F02 / F09, `list_bank`.
+- Steps: importar datos y generar una estrategia; abrir/refrescar el Banco.
+- Expected: `list_bank` devuelve las estrategias y sus métricas.
+- Actual: error SQLite `Invalid column index: 17`; la consulta devuelve índices 0–13.
+- Evidence: reproducido en WebView Tauri contra la base aislada `com.sophiequant.qa`.
+- Status: **fixed** — se eliminó la lectura sobrante del índice 17 y se añadió una prueba Rust para listar una estrategia con una corrida vacía.
+
+### BUG-012: la exportación válida quedaba bloqueada en Tauri
+
+- Severity: S2 (la exportación de escritorio no terminaba).
+- Flow / case: F08-H3.
+- Steps: seleccionar una estrategia existente y ejecutar `export_strategy` en MT5.
+- Expected: recibir el código y registrar la exportación.
+- Actual: el command esperaba indefinidamente al volver a adquirir el mutex de SQLite mientras aún conservaba el guard anterior.
+- Evidence: la invocación IPC válida excedió el timeout; el export inválido sí devolvía su error antes de llegar al bloqueo.
+- Status: **fixed** — se libera el guard antes de la segunda adquisición. Verificado en Tauri: código de 2046 caracteres y registro completado.
+
+### BUG-013: el número de pasadas no se persistía durante una generación
+
+- Severity: S3 (tras refrescar, el progreso mostraba cero aunque existieran estrategias generadas).
+- Flow / case: F01-E3.
+- Steps: iniciar un build, dejar que avance y refrescar S03.
+- Expected: recuperar estado y pasadas desde SQLite.
+- Actual: el estado se persistía, pero `n_passed` se quedaba en cero.
+- Evidence: reproducido en Tauri; la base aislada tenía estrategias mientras `list_builds` devolvía cero pasadas.
+- Status: **fixed** — el reporter persiste `n_passed`/`n_total` en cada actualización; prueba Rust y refresh Tauri verificados.
+
+### BUG-014: el importador descartaba todas las filas de algunos CSV de mercado
+
+- Severity: S2 (bloqueaba importar datasets exportados con otro separador/columnas de fecha y hora).
+- Flow / case: F09 / F09-E3.
+- Steps: importar un CSV con `;` o tabuladores, encabezados de plataforma como `<DATE>/<TIME>` y OHLC, o decimales con coma.
+- Expected: detectar el dialecto y convertir las barras en OHLC.
+- Actual: el importador solo dividía por coma y esperaba timestamp en una única columna; devolvía `0 barras útiles` y descartaba todas.
+- Evidence: error reportado por el usuario: `CSV con solo 0 barras útiles (49533 descartadas)`; los dialectos representativos quedaron cubiertos con pruebas de regresión.
+- Status: **fixed** — detecta coma, punto y coma o tabulador; reconoce cabeceras OHLC y columnas de fecha/hora separadas; acepta coma decimal con separador `;` y fechas DMY.
+
+### Límite manual restante
+
+- No se automatizó el diálogo nativo de selección de fichero ni se usaron datos personales. La importación se verificó llamando al command Tauri real con un CSV sintético de 800 barras.
+- La importación del fichero concreto del usuario aún debe repetirse con esta versión; si sigue fallando, basta con compartir la fila de cabecera y una línea de ejemplo con valores sustituidos, no el histórico completo.
+- No hay S1/S2 abiertos identificados en el código verificado; BUG-014 espera confirmación del CSV concreto.

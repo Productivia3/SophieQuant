@@ -157,7 +157,8 @@ impl Qfn {
     }
 }
 
-/// Import CSV: formato `time,open,high,low,close[,volume]` (time = unix epoch o ISO básico).
+/// Importa CSV separados por coma, punto y coma o tab; acepta timestamps simples
+/// y columnas de fecha/hora separadas con OHLC identificado por cabecera.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportReport {
@@ -183,29 +184,51 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
     let txt = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut bars: Vec<Bar> = Vec::with_capacity(100_000);
     let mut skipped = 0i64;
-    for (ln, line) in txt.lines().enumerate() {
+    let first_line = txt
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with('#'));
+    let delimiter = first_line.map(detect_csv_delimiter).unwrap_or(',');
+    let decimal_comma = delimiter == ';';
+    let columns = first_line
+        .map(|line| csv_fields(line, delimiter))
+        .map(|fields| csv_columns(&fields))
+        .transpose()?
+        .unwrap_or_default();
+
+    for line in txt.lines() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') { continue }
-        let parts: Vec<&str> = line.split(',').map(str::trim).collect();
-        if parts.len() < 5 { skipped += 1; continue }
-        // cabecera habitual (time,open,high,...): se ignora sin contarla como ruido
-        if parts[0].eq_ignore_ascii_case("time") { continue }
-        let parse_f = |s: &str, what: &str| -> Result<f64, String> {
-            s.parse::<f64>().map_err(|_| format!("línea {}: {} inválido ('{s}')", ln + 1, what))
-        };
+        if columns.header && first_line == Some(line) { continue }
+        let parts = csv_fields(line, delimiter);
+        if parts.len() <= columns.max_index() { skipped += 1; continue }
+
         // timestamp roto = fila individual mala: se descarta, no aborta el import
-        let time = match parse_time(parts[0]) {
+        let timestamp = columns.timestamp(&parts);
+        let time = match parse_time(&timestamp) {
             Ok(t) => t,
             Err(_) => { skipped += 1; continue }
         };
-        let (Ok(open), Ok(high), Ok(low), Ok(close)) = (
-            parse_f(parts[1], "open"), parse_f(parts[2], "high"),
-            parse_f(parts[3], "low"), parse_f(parts[4], "close"),
-        ) else {
+        let Some(open) = parse_csv_number(&parts[columns.open], decimal_comma) else {
             skipped += 1;
             continue;
         };
-        let volume = parts.get(5).and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+        let Some(high) = parse_csv_number(&parts[columns.high], decimal_comma) else {
+            skipped += 1;
+            continue;
+        };
+        let Some(low) = parse_csv_number(&parts[columns.low], decimal_comma) else {
+            skipped += 1;
+            continue;
+        };
+        let Some(close) = parse_csv_number(&parts[columns.close], decimal_comma) else {
+            skipped += 1;
+            continue;
+        };
+        let volume = columns
+            .volume
+            .and_then(|index| parse_csv_number(&parts[index], decimal_comma))
+            .unwrap_or(0.0);
         if !(high >= low && high >= open && high >= close && low <= open && low <= close) {
             skipped += 1;
             continue;
@@ -216,7 +239,15 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
     // (ISO + epoch) puede llegarnos desordenado
     bars.sort_by_key(|b| b.time);
     if bars.len() < 2 {
-        return Err(format!("CSV con solo {} barras útiles ({} descartadas)", bars.len(), skipped));
+        let delimiter_name = match delimiter {
+            '\t' => "tabulador",
+            ';' => "punto y coma",
+            _ => "coma",
+        };
+        return Err(format!(
+            "CSV con solo {} barras útiles ({} descartadas). Se detectó separador por {delimiter_name}; se esperan columnas de fecha/hora y OHLC.",
+            bars.len(), skipped
+        ));
     }
     // ── diagnostico de calidad ───────────────────────────────────────
     // Se comprueba el fichero *antes* de darlo por bueno: huecos, timestamps
@@ -284,6 +315,149 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
     Ok((bars, report))
 }
 
+#[derive(Clone, Copy)]
+struct CsvColumns {
+    header: bool,
+    timestamp: Option<usize>,
+    date: Option<usize>,
+    time: Option<usize>,
+    open: usize,
+    high: usize,
+    low: usize,
+    close: usize,
+    volume: Option<usize>,
+}
+
+impl Default for CsvColumns {
+    fn default() -> Self {
+        Self {
+            header: false,
+            timestamp: Some(0),
+            date: None,
+            time: None,
+            open: 1,
+            high: 2,
+            low: 3,
+            close: 4,
+            volume: Some(5),
+        }
+    }
+}
+
+impl CsvColumns {
+    fn max_index(self) -> usize {
+        [
+            self.timestamp,
+            self.date,
+            self.time,
+            Some(self.open),
+            Some(self.high),
+            Some(self.low),
+            Some(self.close),
+        ]
+        .into_iter()
+        .flatten()
+        .max()
+        .unwrap_or(0)
+    }
+
+    fn timestamp(self, fields: &[String]) -> String {
+        if let Some(date) = self.date {
+            return self.time.map_or_else(
+                || fields[date].clone(),
+                |time| format!("{} {}", fields[date], fields[time]),
+            );
+        }
+        fields[self.timestamp.expect("CSV timestamp column is configured")].clone()
+    }
+}
+
+fn detect_csv_delimiter(line: &str) -> char {
+    [',', ';', '\t']
+        .into_iter()
+        .max_by_key(|delimiter| line.matches(*delimiter).count())
+        .filter(|delimiter| line.contains(*delimiter))
+        .unwrap_or(',')
+}
+
+fn csv_fields(line: &str, delimiter: char) -> Vec<String> {
+    line.split(delimiter)
+        .map(|field| field.trim().trim_matches('"').trim().to_string())
+        .collect()
+}
+
+fn csv_header_name(field: &str) -> String {
+    field
+        .trim_start_matches('\u{feff}')
+        .trim()
+        .trim_matches('"')
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>')
+        .to_ascii_lowercase()
+}
+
+fn csv_columns(fields: &[String]) -> Result<CsvColumns, String> {
+    let names = fields.iter().map(|field| csv_header_name(field)).collect::<Vec<_>>();
+    let find = |aliases: &[&str]| names.iter().position(|name| aliases.contains(&name.as_str()));
+    let open = find(&["open"]);
+    let high = find(&["high"]);
+    let low = find(&["low"]);
+    let close = find(&["close"]);
+    let header_count = [open, high, low, close].into_iter().flatten().count();
+    if header_count == 0 {
+        if fields.len() >= 6
+            && parse_time(fields[0].trim()).is_ok()
+            && fields[1].contains(':')
+        {
+            return Ok(CsvColumns {
+                header: false,
+                timestamp: None,
+                date: Some(0),
+                time: Some(1),
+                open: 2,
+                high: 3,
+                low: 4,
+                close: 5,
+                volume: Some(6).filter(|index| fields.len() > *index),
+            });
+        }
+        return Ok(CsvColumns::default());
+    }
+    if header_count != 4 {
+        return Err("CSV con cabecera detectada: deben existir las columnas open, high, low y close".into());
+    }
+
+    let date = find(&["date"]);
+    let time = find(&["time"]);
+    let timestamp = find(&["datetime", "timestamp", "date_time"])
+        .or_else(|| if date.is_none() { time } else { None });
+    if date.is_none() && timestamp.is_none() {
+        return Err("CSV con cabecera detectada: falta la columna time, datetime o date".into());
+    }
+
+    Ok(CsvColumns {
+        header: true,
+        timestamp,
+        date,
+        time: if date.is_some() { time } else { None },
+        open: open.expect("cabecera open detectada"),
+        high: high.expect("cabecera high detectada"),
+        low: low.expect("cabecera low detectada"),
+        close: close.expect("cabecera close detectada"),
+        volume: find(&["volume", "tickvol", "tick_volume", "vol"]),
+    })
+}
+
+fn parse_csv_number(value: &str, decimal_comma: bool) -> Option<f64> {
+    let value = if decimal_comma {
+        value.replace(',', ".")
+    } else {
+        value.to_string()
+    };
+    value.parse::<f64>().ok()
+}
+
 fn parse_time(s: &str) -> Result<i64, String> {
     if let Ok(v) = s.parse::<i64>() {
         // segundos o milisegundos: si es enorme es ms
@@ -300,11 +474,20 @@ fn parse_time(s: &str) -> Result<i64, String> {
     if dp.len() < 3 || dp.len() > 3 {
         return Err(format!("timestamp inválido: '{s}'"));
     }
-    // se exige fecha completa (y-m-d); la parte de hora permite formatos parciales
-    let (y, mo, d) = match (dp[0].parse::<i64>(), dp[1].parse::<i64>(), dp[2].parse::<i64>()) {
-        (Ok(y), Ok(mo), Ok(d)) => (y, mo, d),
+    // Se aceptan fechas y-m-d y d-m-y; la hora permite formatos parciales.
+    let parsed = (
+        dp[0].parse::<i64>(),
+        dp[1].parse::<i64>(),
+        dp[2].parse::<i64>(),
+    );
+    let (y, mo, d) = match parsed {
+        (Ok(first), Ok(mo), Ok(last)) if first >= 1000 => (first, mo, last),
+        (Ok(day), Ok(mo), Ok(year)) if year >= 1000 => (year, mo, day),
         _ => return Err(format!("timestamp inválido: '{s}'")),
     };
+    if !(1..=12).contains(&mo) || !(1..=31).contains(&d) {
+        return Err(format!("timestamp inválido: '{s}'"));
+    }
     let h = tp.first().and_then(|p| p.parse::<i64>().ok()).unwrap_or(0);
     let mi = tp.get(1).and_then(|p| p.parse::<i64>().ok()).unwrap_or(0);
     let se = tp.get(2).and_then(|p| p.parse::<i64>().ok()).unwrap_or(0);
@@ -457,6 +640,46 @@ no-es-numero,1.1,1.1,1.1,1.1,1
         assert_eq!(rep.date_to, 1704787380);
         // gaps de tiempo NO descartan barras (solo fechas raras o inválidas)
         assert_ne!(bars[2].time - bars[1].time, 60, "el gap de minutos existe");
+    }
+
+    #[test]
+    fn import_csv_acepta_punto_y_coma_decimales_y_fecha_hora_separadas() {
+        let p = temp("semicolon.csv");
+        let csv = "\
+Date;Time;Open;High;Low;Close;Tickvol;Vol;Spread
+02.01.2024;09:00:00;1,1000;1,1020;1,0990;1,1015;100;0;2
+02.01.2024;09:01:00;1,1015;1,1030;1,1010;1,1025;120;0;2
+";
+        std::fs::write(&p, csv).unwrap();
+
+        let (bars, report) = import_csv(&p).expect("import semicolon");
+        std::fs::remove_file(&p).ok();
+
+        assert_eq!(report.skipped, 0);
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[0].time, 1704186000);
+        assert!((bars[0].open - 1.1).abs() < 1e-9);
+        assert_eq!(bars[0].volume, 100.0);
+    }
+
+    #[test]
+    fn import_csv_acepta_tab_y_cabecera_mt5_con_bom() {
+        let p = temp("tab.csv");
+        let csv = "\
+\u{feff}<DATE>\t<TIME>\t<OPEN>\t<HIGH>\t<LOW>\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>
+2024.01.02\t09:00:00\t1.1000\t1.1020\t1.0990\t1.1015\t100\t0\t2
+2024.01.02\t09:01:00\t1.1015\t1.1030\t1.1010\t1.1025\t120\t0\t2
+";
+        std::fs::write(&p, csv).unwrap();
+
+        let (bars, report) = import_csv(&p).expect("import tab");
+        std::fs::remove_file(&p).ok();
+
+        assert_eq!(report.skipped, 0);
+        assert_eq!(bars.len(), 2);
+        assert_eq!(bars[0].time, 1704186000);
+        assert_eq!(bars[1].time, 1704186060);
+        assert_eq!(bars[0].volume, 100.0);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-// Editor sin código: guardar de verdad y recalcular la corrida.
+// Editor sin código: distinguir la persistencia real de la vista previa web.
 import { test, expect } from '@playwright/test'
 import AxeConstructor from '@axe-core/playwright'
 
@@ -27,17 +27,16 @@ test.describe('Editor sin código', () => {
     await expect(page.getByRole('radio', { name: /cci/i })).toHaveCount(0)
   })
 
-  test('E-H2 cambiar la regla y guardar recalcula la corrida', async ({ page }) => {
+  test('E-H2 el navegador identifica la vista previa y no afirma que guardó', async ({ page }) => {
     await page.goto('/#/strategy/3/edit')
     await page.getByRole('radio', { name: /reversión rsi/i }).click()
     // el parametro propio de la regla (periodo RSI)
     await expect(page.getByLabel('Periodo RSI')).toBeVisible()
     await page.getByLabel('Periodo RSI').fill('9')
     await page.getByRole('button', { name: /guardar y recalcular/i }).click()
-    await expect(page.getByText(/regla guardada y corrida recalculada/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/vista previa.*no se guarda la regla ni se ejecuta el motor rust/i)).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(/beneficio neto/i).first()).toBeVisible()
-    // la vista anterior y la nueva se comparan
-    await expect(page.getByText(/antes:/i)).toBeVisible()
+    await expect(page.getByText(/antes:/i)).toHaveCount(0)
   })
 
   test('E-H3 el detalle ofrece el acceso al editor', async ({ page }) => {

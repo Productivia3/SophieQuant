@@ -1,44 +1,58 @@
-# Test plan: QuantForge
+# Test plan: SophieQuant
 
-Build: sin commit (repo no iniciado) · Date: 2026-10-20 · Env: local, capa fake (seed data), dev server http://localhost:1420
+Fecha de última verificación: 2026-10-29 · Entorno: Windows, Vite con datos fake + Rust local.
 
 ## Alcance de esta pasada
 
-- **Automatizado (e2e, capa fake)**: Playwright 40 casos + axe — navegación completa, formularios S02, ranura S20/S03/S04/S05/S22, accesibilidad. Suite verde: **40 ✓ / 0 ✘** después del fix-loop (ver `bugs.md`).
-- **Manual / bloqueado**: lo que requiere el binario Tauri (builds reales, import CSV real, export a disco, eventos nativos). Marcadas `block`.
+- **Automatizado**: suite completa de Playwright + axe y tests de motor Rust; resultados actuales resumidos al final.
+- **Manual / bloqueado**: solo los recorridos que necesitan ejecutar la ventana Tauri contra SQLite y ficheros locales.
 
-Leyenda: e2e = automatizado (Playwright + axe) · manual = checklist humano · block = requiere Rust/binario
+Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del motor · Tauri = requiere la ventana de escritorio.
 
 | case | flow | type | steps | expected | auto | result |
 | --- | --- | --- | --- | --- | --- | --- |
 | F01-H1 | generar estrategias | happy | S01 → "Nuevo build" → plantilla/TF → "Correr build" → S03 → "Ver Bank" | S03 con progreso + bank visible | e2e | ✓ |
 | F01-E1 | generar estrategias | edge: TF sin dataset | elegir d1 (solo m1 en seed) | aviso "No hay datos históricos" + enlace a Datos navega | e2e | ✓ |
 | F01-E2 | generar estrategias | edge: doble clic en "Correr build" | doble submit rápido | sin crash, aterriza en S03 | e2e | ✓ |
-| F01-E3 | generar estrategias | edge: refresh mid-build | F5 en S03 durante run | badge correcto tras reload | manual | pendiente |
+| F01-E3 | generar estrategias | edge: refresh mid-build | refrescar S03 mientras el build está activo/pausado | estado y número de pasadas recuperados desde SQLite | Tauri | ✓ (build 4: paused, 15/100 tras refresh; cancelado al acabar) |
 | F01-E4 | generar estrategias | edge: objetivo fuera de rango | nTarget=9 | input clampa a min 10, corre igual | e2e | ✓ |
 | F01-N1 | generar estrategias | negative: build inexistente | /#/build/run/9999 | sin crash (badge pending, 0 pasadas) | e2e | ✓ |
 | F02-H1 | revisar resultados | happy | S04 → fila → S05 | 6 statcards + equity, sin NaN/undefined | e2e | ✓ |
-| F02-E1 | revisar resultados | edge: estrategia dirty | abrir dirty | aviso de problemas visible | manual | pendiente (seed sin dirty) |
+| F02-E1 | revisar resultados | edge: estrategia dirty | abrir estrategia 3 | aviso de revisión visible | e2e | ✓ |
 | F02-E2 | revisar resultados | edge: estrategia sin runs | /#/strategy/9999 | pantalla de carga, sin crash | e2e | ✓ |
-| F03-H1 | improver | happy | S05 → S09 | stub Fase 3 | manual | block (pantalla stub) |
-| F04-H1 | optimizar + 3D | happy | S10 → S11 | stubs | manual | block |
+| F03-H1 | improver | happy | S05 → S09 | variantes comparadas con el original | e2e | ✓ |
+| F04-H1 | optimizar + 3D | happy | S10 → S11 | grid y superficie renderizados | e2e | ✓ |
 | F05-H1 | robustez MC integrada | happy | S02 checkbox MC ON | checkbox accesible (BUG-002 fixed) | e2e | ✓ (persistencia real = block) |
-| F06-H1 | custom project | happy | S16 canvas | Fase 3 | manual | block |
-| F07-H1 | portfolio | happy | S18 → S19 | Fase 3 | manual | block |
+| F06-H1 | custom project | happy | S16 workflow | pasos ejecutados con estado | e2e | ✓ |
+| F07-H1 | portfolio | happy | S18 → S19 | correlación y equity combinada | e2e | ✓ |
 | F08-H1 | exportar | happy | S22: estrategia → MT5 → "Generar código" | pre con código | e2e | ✓ |
 | F08-E1 | exportar | edge: sin estrategia | click Generar sin selección | botón disabled | e2e | ✓ |
 | F08-E2 | exportar | edge: las 6 plataformas | generar en cada una | código coherente por plataforma | e2e | ✓ |
-| F08-N1 | exportar | negative: id inexistente | api directa id=999 | error controlado | manual | pendiente (con Rust) |
+| F08-N1 | exportar | negative: id inexistente | command Tauri con id=999999 | error `estrategia no encontrada`, sin export parcial | Tauri | ✓ (solo quedó el registro de la exportación válida) |
+| F08-H3 | exportar | happy: export nativo | generar MT5 desde estrategia del banco | código y verificación; command termina | Tauri | ✓ (código generado, 2046 caracteres) |
 | F09-H1 | data manager | happy | S20 → "Descargar m1" → toast | dataset badge + toast | e2e | ✓ |
+| F09-H2 | data manager + constructor + banco + exportar | happy: SQLite/QFN real | importar CSV → build → refrescar → banco → export MT5 | dataset listo, build persistido, estrategias listadas y export disponible | Tauri | ✓ (CSV sintético limpio, 800 barras; 2 estrategias; import command real) |
+| F09-E3 | data manager | edge: dialectos CSV comunes | importar separado por `;`/tab, fecha/hora separadas y decimal europeo | OHLC parseado; fecha y volumen correctos | Rust | ✓ |
 | F09-E1 | data manager | edge: descarga simultánea | dos símbolos | solo 1 activa, resto disabled | e2e | ✓ |
-| F09-E2 | data manager | edge: CSV con ruido/gaps | importer CSV (Rust) | descartadas con `skipped`, informe claro | block | **BUG-batch pendiente con Rust** |
-| F10-H1 | retest | happy | S04 multi → S08 | Fase 3 | manual | block |
-| F11-H1 | analyzer | happy | S24 | Fase 4 | manual | block |
-| X-H1 | transversal | navegación completa | 20 rutas del Shell | sin console errors ni 5xx | e2e | ✓ (20/20) |
+| F09-E2 | data manager | edge: CSV con ruido/gaps | importer CSV | filas malas contabilizadas y saltadas | Rust | ✓ |
+| F10-H1 | retest | happy | S04 multi → S08 | resultados con veredicto | e2e | ✓ |
+| F11-H1 | analyzer | happy | S24 | resumen, MC de cartera y gestión de capital | e2e | ✓ |
+| X-H1 | transversal | navegación completa | rutas del Shell | sin console errors ni 5xx | e2e | ✓ (22/22) |
 | X-H2 | transversal | axe | 6 pantallas clave | 0 violaciones | e2e | ✓ (tras BUG-001/002) |
 | X-404 | transversal | negative | /#/no-existe | 404 propio | e2e | ✓ |
-| X-H1b | transversal | mobile 420px | /#/bank con viewport 420 | sin crash; overflow recortado | e2e | ✓ con BUG-005 abierto (S3) |
-| X-E2 | transversal | keyboard only | tab por S02 | foco visible en todo | manual | pendiente |
+| X-H1b | transversal | mobile 420px | /#/bank con viewport 420 | sin crash ni overflow horizontal | e2e | ✓ |
+| X-E2 | transversal | keyboard only | tab + flecha en objetivo de S02 | control alcanzable, modificable y con foco visible | e2e | ✓ |
+
+## Resultado final (2026-10-29)
+
+- Playwright + axe: **106/106** correctos.
+- Rust: **74/74** tests correctos.
+- `npm run build`: correcto.
+- `cargo build --manifest-path src-tauri/Cargo.toml`: correcto; build Tauri QA arrancó con datos aislados.
+- `git diff --check`: correcto.
+- Smoke tests Tauri: importación CSV, generación/persistencia tras refresco, banco, exportación válida y negativa correctos.
+- La ventana usó el identificador `com.sophiequant.qa`; la base normal `%APPDATA%\\com.sophiequant.app\\sophiequant.db` no se modificó.
+- El import se invocó con un CSV sintético de 800 barras mediante el command real; el selector nativo de archivos no se automatizó.
 
 ## Bugs encontrados y su estado
 
@@ -46,13 +60,9 @@ Leyenda: e2e = automatizado (Playwright + axe) · manual = checklist humano · b
 - BUG-002 (S2) checkbox sin label → **fixed**
 - BUG-003 (test) selector ambiguo → **fixed in test**
 - BUG-004 (S3) tablas sin contenedor de scroll en móvil → **fixed**
-- BUG-005 (S3) sidebar no colapsa en móvil → **open** (parrilla Fase 3)
+- BUG-005 (S3) sidebar no colapsa en móvil → **fixed** (drawer móvil, tests X-BUG005-1/2)
 - Detalles en `replica/bugs.md`. No hay S1/S2 abiertos → nada bloquea continuar por esta vía.
 
-## Bloqueos para la siguiente capa de QA (todo con Rust compilado)
+## Límite de verificación nativa
 
-1. Golden-file tests exporters MQL4/MQL5 (Rust unit).
-2. Tests del importer CSV: fila mala, timestamps ms/seg, ISO con/sin T.
-3. Determinismo del genetic (mismo seed → mismo output).
-4. E2E del build real: import CSV → build → bank con métricas reales.
-5. Cero pueda = `pause/resume` cuando se añadan los commands reales.
+No se abrió el diálogo nativo de archivos ni se usó un CSV personal. El command real de importación se verificó con un fichero sintético aislado. Para uso personal, todavía se puede hacer un pase visual del selector nativo y de los avisos de calidad con un CSV propio; no es un bloqueo para el flujo backend validado.

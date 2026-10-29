@@ -372,9 +372,22 @@ struct BuildEvent {
 struct TauriReporter {
     app: AppHandle,
     build_id: i64,
+    db_path: String,
 }
 impl BuildReporter for TauriReporter {
     fn report(&self, level: &str, msg: &str, passed: u32, total: u32, progress: f64) {
+        let progress_db = open_thread_db(&self.db_path)
+            .and_then(|db| persist_build_progress(&db, self.build_id, passed, total));
+        if let Err(e) = progress_db {
+            let _ = self.app.emit("build-event", BuildEvent {
+                build_id: self.build_id,
+                level: "error",
+                message: format!("no se pudo guardar el progreso del build: {e}"),
+                passed,
+                total,
+                progress,
+            });
+        }
         let l = match level { "err" => "error", "warn" => "warn", _ => "info" };
         let _ = self.app.emit("build-event", BuildEvent {
             build_id: self.build_id, level: l,
@@ -454,7 +467,7 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
                 return;
             }
         };
-        let reporter = TauriReporter { app: app2.clone(), build_id };
+        let reporter = TauriReporter { app: app2.clone(), build_id, db_path: db_path.clone() };
 
         let results = genetic::build(&bars, &engine_cfg, &config, &reporter);
 
@@ -537,6 +550,19 @@ fn open_thread_db(path: &str) -> rusqlite::Result<Connection> {
     Ok(c)
 }
 
+fn persist_build_progress(
+    db: &Connection,
+    build_id: i64,
+    passed: u32,
+    total: u32,
+) -> rusqlite::Result<()> {
+    db.execute(
+        "update builds set n_passed = ?1, n_total = ?2 where id = ?3",
+        q![passed, total, build_id],
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_builds(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
     let db = state.db.lock();
@@ -565,6 +591,10 @@ pub fn cancel_build() -> Result<(), String> {
 #[tauri::command]
 pub fn list_bank(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
     let db = state.db.lock();
+    list_bank_rows(&db)
+}
+
+fn list_bank_rows(db: &Connection) -> Result<Vec<serde_json::Value>, String> {
     let mut st = db.prepare(
         "select s.id, s.name, sy.name, s.timeframe, s.status,
                 b.net_profit, b.profit_factor, b.win_rate, b.max_dd, b.n_trades, b.sharpe, b.equity, b.oos_frac,
@@ -591,7 +621,6 @@ pub fn list_bank(state: State<AppState>) -> Result<Vec<serde_json::Value>, Strin
             "robustScore": r.get::<_, Option<f64>>(13)?,
             "lastRun": {
                 "equity": equity_raw.and_then(|e| serde_json::from_str::<Vec<f64>>(&e).ok()),
-            "oosFrac": r.get::<_, Option<f64>>(17)?,
                 "oosFrac": r.get::<_, Option<f64>>(12)?,
                 "status": "done",
             },
@@ -683,6 +712,7 @@ pub fn export_strategy(
         .unwrap_or_default();
     let verificacion = export::verification(tmpl, params, &cfg);
 
+    drop(db);
     let db2 = state.db.lock();
     db2.execute(
         "insert into exports (strategy_id, platform, file_name) values (?1, ?2, ?3)",
@@ -1515,11 +1545,40 @@ pub fn run_optimizer(state: State<AppState>, strategy_id: i64, param_a: String, 
 pub fn run_wfm(state: State<AppState>, strategy_id: i64, a: String, b: String, steps: i64) -> Result<serde_json::Value, String> {
     let db = state.db.lock();
     let core = load_core(&db, strategy_id)?;
-    let g = ops::run_grid(&core, &EngineCfg::default(), steps as usize, "wf")?;
+    let cfg = cfg_for_symbol(&db, strategy_id);
+    let g = ops::run_grid(&core, &cfg, steps as usize, "wf")?;
     // historial: la mejor celda de la matriz y su veredicto
     let best = g["best"].clone();
     let verdict = best["verdict"].as_str().unwrap_or("pending").to_string();
     let metricas = pick_metrics(&best, &["wfe", "a", "b"]);
+
+    let cut = (core.bars.len() * 6 / 10).max(60);
+    let params = [
+        best["a"].as_f64().ok_or("la mejor celda WF no contiene el parámetro A")?.max(2.0),
+        best["b"].as_f64().ok_or("la mejor celda WF no contiene el parámetro B")?.max(2.0),
+        core.params[2],
+    ];
+    let is = crate::engine::backtest::run(&core.bars[..cut], core.template, params, &cfg);
+    let oos_bars = &core.bars[cut..];
+    let oos = crate::engine::backtest::run(oos_bars, core.template, params, &cfg);
+    let oos_years = match (oos_bars.first(), oos_bars.last()) {
+        (Some(first), Some(last)) => {
+            (last.time.saturating_sub(first.time) as f64 / 31_557_600.0).max(0.0)
+        }
+        _ => 0.0,
+    };
+    let (peak_is, _) = equity_peak_and_max_drawdown(
+        is.trades.iter().map(|trade| trade.profit),
+        cfg.initial_balance,
+    );
+    let (_, max_dd_oos) = equity_peak_and_max_drawdown(
+        oos.trades.iter().map(|trade| trade.profit),
+        cfg.initial_balance,
+    );
+    let oos_trades = oos.trades.len();
+    let (insufficient_oos, stopped) =
+        wfm_validation_flags(oos_trades, oos_years, peak_is, max_dd_oos);
+
     record_run(
         &db, strategy_id, "wf_matrix", &verdict,
         &format!("{} x {}", a, b),
@@ -1531,7 +1590,37 @@ pub fn run_wfm(state: State<AppState>, strategy_id: i64, a: String, b: String, s
     Ok(serde_json::json!({
         "strategyId": strategy_id, "paramA": a, "paramB": b,
         "aValues": g["aValues"], "bValues": g["bValues"], "cells": g["cells"],
+        "insufficientOos": insufficient_oos,
+        "oosTradesApprox": oos_trades,
+        "oosYearsApprox": (oos_years * 10.0).round() / 10.0,
+        "stopped": stopped,
     }))
+}
+
+fn equity_peak_and_max_drawdown(
+    profits: impl Iterator<Item = f64>,
+    initial_balance: f64,
+) -> (f64, f64) {
+    let mut balance = initial_balance;
+    let mut peak = initial_balance;
+    let mut max_drawdown = 0.0_f64;
+    for profit in profits {
+        balance += profit;
+        peak = peak.max(balance);
+        max_drawdown = max_drawdown.max(peak - balance);
+    }
+    (peak, max_drawdown)
+}
+
+fn wfm_validation_flags(
+    oos_trades: usize,
+    oos_years: f64,
+    peak_is: f64,
+    max_dd_oos: f64,
+) -> (bool, bool) {
+    let insufficient_oos = oos_trades < 30 || oos_years < 1.0;
+    let stopped = peak_is > 0.0 && max_dd_oos / peak_is > 0.8;
+    (insufficient_oos, stopped)
 }
 
 #[tauri::command(async)]
@@ -2008,6 +2097,68 @@ pub fn run_opt_profile(state: State<AppState>, strategy_id: i64) -> Result<serde
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn los_flags_wf_usan_trades_duracion_y_drawdown_reales() {
+        assert_eq!(wfm_validation_flags(29, 1.0, 20_000.0, 0.0), (true, false));
+        assert_eq!(wfm_validation_flags(30, 0.9, 20_000.0, 0.0), (true, false));
+        assert_eq!(wfm_validation_flags(30, 1.0, 20_000.0, 16_000.0), (false, false));
+        assert_eq!(wfm_validation_flags(30, 1.0, 20_000.0, 16_001.0), (false, true));
+    }
+
+    #[test]
+    fn drawdown_wf_compara_el_deterioro_oos_con_el_peak_is() {
+        let (peak, drawdown) =
+            equity_peak_and_max_drawdown([10_000.0, -17_000.0].into_iter(), 10_000.0);
+        assert_eq!(peak, 20_000.0);
+        assert_eq!(drawdown, 17_000.0);
+    }
+
+    #[test]
+    fn listar_banco_lee_columnas_existentes_y_devuelve_estrategias() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::engine::datastore::init_schema(&conn).unwrap();
+        conn.execute(
+            "insert into symbols (name, asset_class) values ('EURUSD', 'forex')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "insert into strategies (name, symbol_id, timeframe, origin, logic)
+             values ('QA strategy', 1, 'm1', 'builder', '{}')",
+            [],
+        )
+        .unwrap();
+
+        let bank = list_bank_rows(&conn).unwrap();
+
+        assert_eq!(bank.len(), 1);
+        assert_eq!(bank[0]["name"], "QA strategy");
+        assert_eq!(bank[0]["lastRun"]["oosFrac"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn persistir_progreso_actualiza_las_pasadas_del_build() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::engine::datastore::init_schema(&conn).unwrap();
+        conn.execute(
+            "insert into builds (kind, config, status, n_total) values ('builder', '{}', 'running', 1)",
+            [],
+        )
+        .unwrap();
+        let build_id = conn.last_insert_rowid();
+
+        persist_build_progress(&conn, build_id, 7, 100).unwrap();
+
+        let progress: (i64, i64) = conn
+            .query_row(
+                "select n_passed, n_total from builds where id = ?1",
+                rusqlite::params![build_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(progress, (7, 100));
+    }
 
     /// La configuracion del motor sale de los metadatos del simbolo, no de los
     /// valores por defecto (que son de Forex USD-quote).

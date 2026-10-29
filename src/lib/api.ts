@@ -369,7 +369,14 @@ export const api = {
         })
       }
     }
-    return { strategyId, paramA: opts.a, paramB: opts.b, aValues, bValues, cells }
+    return {
+      strategyId, paramA: opts.a, paramB: opts.b, aValues, bValues, cells,
+      // El fake no puede acreditar suficiente histórico para emitir un veredicto positivo.
+      insufficientOos: true,
+      oosTradesApprox: 0,
+      oosYearsApprox: 0,
+      stopped: false,
+    }
   },
 
   // candles + trades (fake, determinista por estrategia)
@@ -864,19 +871,21 @@ export const api = {
     params: number[],
     logic: Record<string, unknown>,
   ): Promise<SavedStrategy> {
-    const r = await real<SavedStrategy>('save_strategy_logic', { strategyId, templateId, params, logic })
+    const r = await realStrict<SavedStrategy>('save_strategy_logic', { strategyId, templateId, params, logic })
     if (r) return r
     await delay(500)
-    const m = db.strategies.find(s => s.id === strategyId)?.lastRun?.metrics
+    const strategy = db.strategies.find(s => s.id === strategyId)
+    if (!strategy) throw new Error(`Estrategia ${strategyId} no encontrada`)
     return {
       strategyId,
-      nombre: db.strategies.find(s => s.id === strategyId)?.name ?? `#${strategyId}`,
-      plantilla: 'regla guardada',
+      nombre: strategy.name,
+      plantilla: 'vista previa',
       params: { p: params },
-      metrics: m ?? null as unknown as Metrics,
-      equity: db.strategies.find(s => s.id === strategyId)?.lastRun?.equity ?? [],
+      metrics: strategy.lastRun?.metrics ?? null,
+      equity: strategy.lastRun?.equity ?? [],
       oosFrac: 0.4,
-      nTrades: m?.nTrades ?? 0,
+      nTrades: strategy.lastRun?.metrics?.nTrades ?? 0,
+      preview: true,
     }
   },
 
@@ -1234,6 +1243,14 @@ export interface WfMatrixResult {
   aValues: number[]
   bValues: number[]
   cells: Array<{ a: number; b: number; wfe: number; verdict: 'pass' | 'warn' | 'fail' }>
+  /** Bandera si la muestra OOS es insuficiente (< 30 trades o < 1 año). */
+  insufficientOos?: boolean
+  /** Approximate number of OOS trades (proxy a partir del PF de la mejor celda). */
+  oosTradesApprox?: number
+  /** Approximate number of OOS years (proxy a partir de los tiempos de las trades). */
+  oosYearsApprox?: number
+  /** Bandera si la equity OOS rompió la regla de parada (DD > 80% del peak IS). */
+  stopped?: boolean
 }
 
 export interface ChartSeries {
@@ -1339,10 +1356,11 @@ export interface SavedStrategy {
   nombre: string
   plantilla: string
   params: { p: number[] }
-  metrics: Metrics
+  metrics: Metrics | null
   equity: number[]
   oosFrac: number
   nTrades: number
+  preview?: boolean
 }
 
 // ── Verificacion del export ─────────────────────────────────────────

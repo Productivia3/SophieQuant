@@ -105,6 +105,11 @@ test.describe('F02 revisar resultados', () => {
     expect(body).not.toContain('undefined')
   })
 
+  test('F02-E1 estrategia marcada dirty muestra aviso de revisión', async ({ page }) => {
+    await page.goto('/#/strategy/3')
+    await expect(page.getByRole('alert')).toContainText(/estrategia marcada para revisión/i)
+  })
+
   test('F02-E2 estrategia 9999 → pantalla no cruja', async ({ page }) => {
     await page.goto('/#/strategy/9999')
     // fake api devuelve null → Title '…' y esqueleto

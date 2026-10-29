@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Play, Repeat, Columns3, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Play, Repeat, Columns3, AlertTriangle, RefreshCw, CheckCircle } from 'lucide-react'
 import { api } from '../lib/api'
 import type { McSuiteResult, WfMatrixResult, ChartSeries, SavedStrategy } from '../lib/api'
 import type { StrategyRec } from '../lib/types'
@@ -34,8 +34,7 @@ export function S13MonteCarlo() {
 
   useEffect(() => { api.listBank({}).then(rs => { setRows(rs); setSel(rs[0] ?? null) }) }, [])
 
-  const toggle = (k: string) =>
-    setTests(prev => prev.includes(k) ? prev.filter(t => t !== k) : [...prev, k])
+  const toggle = (k: string) => setTests(prev => prev.includes(k) ? prev.filter(t => t !== k) : [...prev, k])
 
   async function run() {
     if (!sel) return
@@ -67,8 +66,7 @@ export function S13MonteCarlo() {
                 <li key={t.key}>
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" checked={tests.includes(t.key)}
-                      onChange={() => toggle(t.key)} />
-                    {t.label}
+                      onChange={() => toggle(t.key)} />{t.label}
                   </label>
                 </li>
               ))}
@@ -205,6 +203,27 @@ function Heatmap({ matrix }: { matrix: WfMatrixResult }) {
           ))}
         </tbody>
       </table>
+      {/* ---- Nuevos mensajes de validación Block 1 item 1.4 ---- */}
+      <div className="mt-3 flex flex-col gap-2 text-sm">
+        {matrix.insufficientOos && (
+          <div className="flex items-center gap-2 text-danger">
+            <AlertTriangle size={14} aria-hidden />
+            <span>poca data OOS: &lt;30 trades o &lt;1 a&ntilde;o: resultados no confiables</span>
+          </div>
+        )}
+        {matrix.stopped && (
+          <div className="flex items-center gap-2 text-warning">
+            <AlertTriangle size={14} aria-hidden />
+            <span>estrategia detenida por regla de parada: DD OOS &gt;80% del peak IS</span>
+          </div>
+        )}
+        {!matrix.insufficientOos && !matrix.stopped && (
+          <div className="flex items-center gap-2 text-success">
+            <CheckCircle size={14} aria-hidden />
+            <span>validación Block 1 pasada: muestra OOS suficiente y sin detener</span>
+          </div>
+        )}
+      </div>
       <p className="mt-2 flex items-center gap-2 text-xs text-muted">
         <span aria-hidden className="h-3 w-8 rounded-sm" style={{ background: cellColor(70) }} /> estable
         <span aria-hidden className="h-3 w-8 rounded-sm" style={{ background: cellColor(40) }} /> débil
@@ -227,9 +246,7 @@ export function S06Chart() {
   const strategyId = +(params.id ?? 1)
   const [series, setSeries] = useState<ChartSeries | null>(null)
   const [name, setName] = useState('')
-  const [overlayOn, setOverlayOn] = useState<Record<string, boolean>>({
-    ema20: true, ema50: true, sma200: false,
-  })
+  const [overlayOn, setOverlayOn] = useState<Record<string, boolean>>({ ema20: true, ema50: true, sma200: false })
 
   useEffect(() => {
     api.getStrategy(strategyId).then(s => setName(s?.name ?? `#${strategyId}`))
@@ -237,7 +254,7 @@ export function S06Chart() {
   }, [strategyId])
 
   return (
-    <Page title={name ? `${name} — operaciones` : '…'} icon={<Columns3 size={16} />}>
+    <Page title={name ? `${name} — operaciones` : '...'} icon={<Columns3 size={16} />}>
       {!series ? <TableSkeleton rows={5} height={300} /> : (
         <div className="p-4">
           <div className="rounded-md border border-border bg-surface p-3">
@@ -256,8 +273,7 @@ export function S06Chart() {
                   aria-label={`Mostrar ${o.label}`}
                   onChange={e => setOverlayOn({ ...overlayOn, [o.key]: e.target.checked })} />
                 <span aria-hidden className="inline-block h-0.5 w-4 rounded"
-                  style={{ background: OVERLAY_COLORS[o.key] ?? 'var(--color-accent)' }} />
-                {o.label}
+                  style={{ background: OVERLAY_COLORS[o.key] ?? 'var(--color-accent)' }} />{o.label}
               </label>
             ))}
           </div>
@@ -296,12 +312,10 @@ function CandleChart({ candles, trades, oosFrom, oosLabel, overlays, overlayOn }
 
   return (
     <svg viewBox={`0 0 ${w} ${h}`} className="h-[320px] w-full" role="img" aria-label="Gráfico de velas con operaciones">
-      {/* grid */}
       {[0, 1, 2, 3, 4].map(g => (
         <line key={g} x1={0} x2={w} y1={pad + (g * (h - pad * 2)) / 4} y2={pad + (g * (h - pad * 2)) / 4}
           stroke="var(--chart-grid)" strokeWidth={1} />
       ))}
-      {/* zona out-of-sample (mismo corte que la comprobacion walk-forward) */}
       {oosFrom != null && oosFrom > 0 && oosFrom < 1 && (
         <>
           <rect x={x(Math.round((1 - oosFrom) * (candles.length - 1)))} y={0}
@@ -310,9 +324,7 @@ function CandleChart({ candles, trades, oosFrom, oosLabel, overlays, overlayOn }
           <line x1={x(Math.round((1 - oosFrom) * (candles.length - 1)))} y1={0}
             x2={x(Math.round((1 - oosFrom) * (candles.length - 1)))} y2={h}
             stroke="var(--color-border-input)" strokeWidth={1} strokeDasharray="5 4" />
-        </>
-      )}
-      {/* velas */}
+        </>)}
       {candles.map((c, i) => {
         const up = c.c >= c.o
         const color = up ? 'var(--chart-up)' : 'var(--chart-down)'
@@ -326,7 +338,6 @@ function CandleChart({ candles, trades, oosFrom, oosLabel, overlays, overlayOn }
           </g>
         )
       })}
-      {/* medias (overlays) */}
       {(overlays ?? []).map(o => {
         if (overlayOn && overlayOn[o.key] === false) return null
         const pts: string[] = []
@@ -341,7 +352,6 @@ function CandleChart({ candles, trades, oosFrom, oosLabel, overlays, overlayOn }
             strokeWidth={1.2} opacity={0.9} vectorEffect="non-scaling-stroke" />
         )
       })}
-      {/* trades */}
       {markers.map(m => (
         <g key={m.key}>
           <circle cx={m.x} cy={m.yE} r={3.2}
@@ -358,9 +368,7 @@ function CandleChart({ candles, trades, oosFrom, oosLabel, overlays, overlayOn }
 
 /* ───────────────────────── S07 · Editor de estrategia ───────────── */
 
-interface RuleRow {
-  left: string; op: string; right: string
-}
+interface RuleRow { left: string; op: string; right: string }
 
 const indicatorOptions = ['RSI(14)', 'MA(20) close', 'EMA(50) close', 'MACD(12,26,9) signal', 'Stoch(14,3) %K', 'CCI(14)', 'ATR(14)', 'Bollinger(20,2) upper', 'Bollinger(20,2) lower']
 const marketOptions = ['High', 'Low', 'Open', 'Close', 'Previous bar close']
@@ -368,11 +376,7 @@ const opOptions = ['>', '<', '≥', '≤', 'crosses above', 'crosses below']
 const targetOptions = ['Open trade', 'Close trade', 'Nothing (continuar)']
 const valueOptions = ['70', '30', '1.5 × ATR(14)', 'Close de ayer']
 
-/**
- * Reglas que el motor ejecuta de verdad (engine/rules.rs). El editor solo
- * ofrece estas: no hay bloques decorativos que luego el motor no sepa evaluar.
- * `paramNames` debe coincidir con `Template::param_names()` del motor.
- */
+/** Reglas que el motor ejecuta de verdad (engine/rules.rs). El editor solo ofrece estas: no hay bloques decorativos que luego el motor no sepa evaluar. `paramNames` debe coincidir con `Template::param_names()` del motor. */
 interface Regla {
   id: number
   nombre: string
@@ -383,30 +387,9 @@ interface Regla {
 }
 
 const reglas: Regla[] = [
-  {
-    id: 1,
-    nombre: 'Cruce de medias',
-    resumen: 'Entra cuando la media rapida cruza por encima de la lenta; sale cuando cruza por debajo.',
-    paramNames: ['p_fast', 'p_slow', '-'],
-    labels: ['Media rapida', 'Media lenta', '—'],
-    defaults: [20, 50, 0],
-  },
-  {
-    id: 2,
-    nombre: 'Reversión RSI',
-    resumen: 'Entra cuando el RSI sale de sobreventa; sale cuando sale de sobrecompra.',
-    paramNames: ['p_rsi', 'th_low', 'th_high'],
-    labels: ['Periodo RSI', 'Umbral de sobreventa', 'Umbral de sobrecompra'],
-    defaults: [14, 30, 70],
-  },
-  {
-    id: 3,
-    nombre: 'Ruptura con filtro de tendencia',
-    resumen: 'Entra al romper el maximo de la ventana; sale al perder el minimo.',
-    paramNames: ['p_lookback', 'sl_atr', 'tp_atr'],
-    labels: ['Ventana de ruptura', 'Stop (x ATR)', 'Objetivo (x ATR)'],
-    defaults: [20, 2, 3],
-  },
+  { id: 1, nombre: 'Cruce de medias', resumen: 'Entra cuando la media rapida cruza por encima de la lenta; sale cuando cruza por debajo.', paramNames: ['p_fast', 'p_slow', '-'], labels: ['Media rapida', 'Media lenta', '—'], defaults: [20, 50, 0] },
+  { id: 2, nombre: 'Reversión RSI', resumen: 'Entra cuando el RSI sale de sobreventa; sale cuando sale de sobrecompra.', paramNames: ['p_rsi', 'th_low', 'th_high'], labels: ['Periodo RSI', 'Umbral de sobreventa', 'Umbral de sobrecompra'], defaults: [14, 30, 70] },
+  { id: 3, nombre: 'Ruptura con filtro de tendencia', resumen: 'Entra al romper el maximo de la ventana; sale al perder el minimo.', paramNames: ['p_lookback', 'sl_atr', 'tp_atr'], labels: ['Ventana de ruptura', 'Stop (x ATR)', 'Objetivo (x ATR)'], defaults: [20, 2, 3] },
 ]
 
 export function S07Editor() {
@@ -420,7 +403,6 @@ export function S07Editor() {
   const [guardado, setGuardado] = useState<SavedStrategy | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // cargar la estrategia real (plantilla y parametros guardados)
   useEffect(() => {
     api.getStrategy(strategyId).then(s => {
       if (!s) return
@@ -429,11 +411,7 @@ export function S07Editor() {
       const regla = reglas.find(r => r.id === tpl) ?? reglas[0]
       const p = (s.params as { p?: number[] } | null)?.p
       setReglaId(regla.id)
-      setVals([
-        typeof p?.[0] === 'number' ? p[0] : regla.defaults[0],
-        typeof p?.[1] === 'number' ? p[1] : regla.defaults[1],
-        typeof p?.[2] === 'number' ? p[2] : regla.defaults[2],
-      ])
+      setVals([typeof p?.[0] === 'number' ? p[0] : regla.defaults[0], typeof p?.[1] === 'number' ? p[1] : regla.defaults[1], typeof p?.[2] === 'number' ? p[2] : regla.defaults[2]])
     })
   }, [strategyId])
 
@@ -466,13 +444,15 @@ export function S07Editor() {
   const antes = strategy?.lastRun?.metrics
 
   return (
-    <Page title={strategy ? `Editar ${strategy.name}` : 'Editor de estrategia'}
+    <Page
+      title={strategy ? `Editar ${strategy.name}` : 'Editor de estrategia'}
       icon={<RefreshCw size={16} />}
       actions={
-        <Button variant="primary" loading={busy} onClick={() => void guardar()}>
+        <Button variant="primary" loading={busy} disabled={!strategy || busy} onClick={() => void guardar()}>
           Guardar y recalcular
         </Button>
-      }>
+      }
+    >
       <div className="mx-auto max-w-3xl space-y-4 p-4">
         {!strategy ? <TableSkeleton rows={4} height={180} /> : (
           <>
@@ -481,10 +461,8 @@ export function S07Editor() {
               <div className="space-y-2" role="radiogroup" aria-label="Regla de la estrategia">
                 {reglas.map(r => (
                   <label key={r.id}
-                    className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${
-                      reglaId === r.id ? 'border-accent text-text' : 'border-border text-muted hover:border-border-input'}`}>
-                    <input type="radio" name="regla" value={r.id} checked={reglaId === r.id}
-                      onChange={() => cambiarRegla(r.id)} className="mt-0.5" />
+                    className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 text-sm ${ reglaId === r.id ? 'border-accent text-text' : 'border-border text-muted hover:border-border-input'}`}>
+                    <input type="radio" name="regla" value={r.id} checked={reglaId === r.id} onChange={() => cambiarRegla(r.id)} className="mt-0.5" />
                     <span>
                       <span className="font-medium text-text">{r.nombre}</span>
                       <span className="block text-xs text-muted">{r.resumen}</span>
@@ -493,8 +471,7 @@ export function S07Editor() {
                 ))}
               </div>
               <p className="mt-2 text-xs text-muted">
-                El motor ejecuta estas tres reglas y nada mas: por eso el editor no ofrece
-                bloques que luego no sabria evaluar (MACD, Stochastic, CCI, patrones de vela…).
+                El motor ejecuta estas tres reglas y nada mas: por qué el editor no ofrece bloques que luego no sabría evaluar (MACD, Stochastic, CCI, patrones de vela…).
               </p>
             </section>
 
@@ -514,37 +491,35 @@ export function S07Editor() {
                       disabled={regla.paramNames[i] === '-'}
                       value={Number.isFinite(vals[i]) ? vals[i] : ''}
                       onChange={e => {
-                        const v = Number(e.target.value)
-                        setVals(prev => {
-                          const next: [number, number, number] = [...prev]
-                          next[i] = Number.isFinite(v) ? v : prev[i]
+                        const value = Number(e.target.value)
+                        setVals(previous => {
+                          const next: [number, number, number] = [...previous]
+                          next[i] = Number.isFinite(value) ? value : previous[i]
                           return next
                         })
                         setGuardado(null)
                       }}
-                      className="h-8 w-full rounded-md border border-border-input bg-surface px-2 font-mono text-sm text-text disabled:opacity-50" />
+                      className="h-8 w-full rounded-md border border-border-input bg-surface px-2 font-mono text-sm text-text disabled:opacity-50"
+                    />
                   </label>
                 ))}
               </div>
-              <p className="mt-2 text-xs text-muted">
-                Al cumplirse: <b>comprar</b> y cerrar al salir. La version actual es solo largo.
-              </p>
+              <p className="mt-2 text-xs text-muted">Al cumplirse: <b>comprar</b> y cerrar al salir. La version actual es solo largo.</p>
             </section>
 
-            {error && (
-              <div role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">
-                {error}
-              </div>
-            )}
-
+            {error && (<div role="alert" className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{error}</div>)}
             {guardado && (
               <div role="status" className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success">
-                <p><b>Regla guardada y corrida recalculada</b> sobre tu dataset.</p>
+                <p>
+                  {guardado.preview
+                    ? <><b>Vista previa</b>: en el navegador no se guarda la regla ni se ejecuta el motor Rust.</>
+                    : <><b>Regla guardada y corrida recalculada</b> sobre tu dataset.</>}
+                </p>
                 <p className="mt-1 font-mono text-xs">
                   Beneficio neto {fmtMoney(guardado.metrics?.netProfit)} · PF {fmtNum(guardado.metrics?.profitFactor)} ·
                   Max DD {fmtNum(guardado.metrics?.maxDD, 1)} % · {guardado.nTrades} operaciones
                 </p>
-                {antes && (
+                {!guardado.preview && antes && (
                   <p className="mt-1 text-xs">
                     Antes: {fmtMoney(antes.netProfit)} · PF {fmtNum(antes.profitFactor)} ·
                     Max DD {fmtNum(antes.maxDD, 1)} % · {antes.nTrades} operaciones
@@ -554,14 +529,8 @@ export function S07Editor() {
             )}
 
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => navigate(`/strategy/${strategyId}`)}>
-                Volver a resultados
-              </Button>
-              {guardado && (
-                <Button variant="ghost" onClick={() => navigate(`/strategy/${strategyId}`)}>
-                  Ver la estrategia actualizada
-                </Button>
-              )}
+              <Button variant="secondary" onClick={() => navigate(`/strategy/${strategyId}`)}>Volver a resultados</Button>
+              {guardado && (<Button variant="ghost" onClick={() => navigate(`/strategy/${strategyId}`)}>Ver la estrategia actualizada</Button>)}
             </div>
           </>
         )}
@@ -571,20 +540,9 @@ export function S07Editor() {
 }
 
 function Section2({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <fieldset className="rounded-md border border-border bg-surface p-3">
-      <legend className="px-1 text-sm font-semibold text-muted">{title}</legend>
-      <div className="space-y-2">{children}</div>
-    </fieldset>
-  )
+  return (<fieldset className="rounded-md border border-border bg-surface p-3"><legend className="px-1 text-sm font-semibold text-muted">{title}</legend><div className="space-y-2">{children}</div></fieldset>)
 }
 
 function Select({ v, opts, on }: { v: string; opts: string[]; on: (v: string) => void }) {
-  return (
-    <select aria-label="valor" className="h-8 rounded-md border border-border-input bg-surface px-2 text-sm"
-      value={v} onChange={e => on(e.target.value)}>
-      {opts.map(o => <option key={o} value={o}>{o}</option>)}
-    </select>
-  )
+  return (<select aria-label="valor" className="h-8 rounded-md border border-border-input bg-surface px-2 text-sm" value={v} onChange={e => on(e.target.value)}>{opts.map(o => <option key={o} value={o}>{o}</option>)}</select>)
 }
-
