@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Play, TrendingUp, Wallet, FileUp, FileDown, Save, Activity, Boxes,
+  Play, TrendingUp, Wallet, FileUp, FileDown, Activity, Boxes,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import type {
-  AppSettings, OptProfilePoint, OptProfileResult, PortfolioMcResult, PortfolioResults,
+  OptProfilePoint, OptProfileResult, PortfolioMcResult, PortfolioResults,
 } from '../lib/api'
 import type { DataFileRec, StrategyRec } from '../lib/types'
 import { Page } from '../components/Page'
@@ -561,53 +561,41 @@ function MetaFila({ sym, onGuardar }: {
 }
 
 export function S23Settings() {
-  const [s, setS] = useState<AppSettings | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [saved, setSaved] = useState(false)
   const [simbolos, setSimbolos] = useState<Awaited<ReturnType<typeof api.listSymbolMeta>>>([])
   const [metaMsg, setMetaMsg] = useState<string | null>(null)
+  const [metaError, setMetaError] = useState<string | null>(null)
 
   useEffect(() => {
-    api.getSettings().then(setS)
     api.listSymbolMeta().then(setSimbolos)
   }, [])
 
-  async function save() {
-    if (!s) return
-    setBusy(true); setSaved(false)
-    await api.updateSettings(s)
-    setSaved(true); setBusy(false)
-  }
-
   async function guardarMeta(id: number, meta: Parameters<typeof api.updateSymbolMeta>[1]) {
+    setMetaMsg(null)
+    setMetaError(null)
     try {
       await api.updateSymbolMeta(id, meta)
       setMetaMsg('Metadatos del s\u00edmbolo guardados. A partir de ahora el motor los usa en los pr\u00f3ximos an\u00e1lisis.')
       setSimbolos(await api.listSymbolMeta())
     } catch (e) {
-      setMetaMsg(e instanceof Error ? e.message : String(e))
+      setMetaError(e instanceof Error ? e.message : String(e))
     }
   }
 
-  if (!s) return <Page title="Ajustes" icon={<Activity size={16} />}><TableSkeleton /></Page>
-
-  const field = 'rounded-md border border-border-input bg-surface px-2 py-1.5 text-sm'
-
   return (
-    <Page title="Ajustes" icon={<Activity size={16} />}
-      actions={
-        <Button variant="primary" loading={busy} onClick={save}>
-          <Save size={14} aria-hidden /> Guardar ajustes
-        </Button>
-      }>
-      <div className="mx-auto max-w-3xl space-y-4 p-4">
+    <Page title="Ajustes" icon={<Activity size={16} />}>
+      <div className="mx-auto max-w-5xl space-y-4 p-4">
         <section className="rounded-md border border-border bg-surface p-3">
-          <h2 className="mb-1 text-sm font-semibold text-muted">Metadatos de mercado por s\u00edmbolo</h2>
+          <h2 className="mb-1 text-sm font-semibold text-muted">Metadatos de mercado por símbolo</h2>
           <p className="mb-3 text-xs text-muted">
-            El motor usa estos valores, no los gen\u00e9ricos: el pip, el tama\u00f1o de contrato, la
-            comisi\u00f3n, los swaps por noche y el spread de cada sesi\u00f3n (Asia / Londres / Nueva York).
-            Los swaps del broker cambian cada semana: actual\u00edzalos.
+            El motor usa estos valores, no los genéricos: el pip, el tamaño de contrato, la
+            comisión, los swaps por noche y el spread de cada sesión (Asia / Londres / Nueva York).
+            Los swaps del broker cambian cada semana: actualízalos.
           </p>
+          {metaError && (
+            <p className="mb-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger" role="alert">
+              No se pudieron guardar los metadatos: {metaError}
+            </p>
+          )}
           {metaMsg && (
             <p className="mb-2 rounded-md border border-border bg-surface-raised p-2 text-xs text-muted" role="status">
               {metaMsg}
@@ -641,66 +629,6 @@ export function S23Settings() {
             </div>
           )}
         </section>
-
-        {saved && (
-          <p className="rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success" role="status">
-            Ajustes guardados.
-          </p>
-        )}
-
-        <div className="rounded-md border border-border bg-surface p-4">
-          <h2 className="mb-3 text-sm font-semibold text-muted">Datos y motor</h2>
-          <label className="mb-1 block text-xs text-muted" htmlFor="st-datadir">
-            Carpeta de datos locales
-          </label>
-          <input id="st-datadir" className={`mb-3 w-full ${field}`} value={s.dataDir}
-            onChange={e => setS({ ...s, dataDir: e.target.value })} />
-          <label className="mb-1 block text-xs text-muted" htmlFor="st-threads">
-            Hilos del motor: <span className="font-mono text-text">{s.engineThreads}</span>
-          </label>
-          <input id="st-threads" type="range" min={1} max={16} value={s.engineThreads}
-            onChange={e => setS({ ...s, engineThreads: +e.target.value })} className="w-full" />
-        </div>
-
-        <div className="rounded-md border border-border bg-surface p-4">
-          <h2 className="mb-3 text-sm font-semibold text-muted">Red</h2>
-          <label className="mb-1 block text-xs text-muted" htmlFor="st-proxy">
-            Proxy (vacío = directo). Para descargas de datos detrás de cortafuegos.
-          </label>
-          <input id="st-proxy" className={`w-full ${field}`} value={s.proxy} placeholder="http://host:puerto"
-            onChange={e => setS({ ...s, proxy: e.target.value })} />
-        </div>
-
-        <div className="rounded-md border border-border bg-surface p-4">
-          <h2 className="mb-3 text-sm font-semibold text-muted">Apariencia y idioma</h2>
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <label htmlFor="st-theme" className="text-sm">Tema</label>
-            <select id="st-theme" className={selectCls} value={s.theme}
-              onChange={e => setS({ ...s, theme: e.target.value as AppSettings['theme'] })}>
-              <option value="dark">Oscuro</option>
-              <option value="light">Claro (llega con el motor de temas)</option>
-            </select>
-          </div>
-          <div className="mb-3 flex items-center justify-between gap-4">
-            <label htmlFor="st-lang" className="text-sm">Idioma</label>
-            <select id="st-lang" className={selectCls} value={s.language}
-              onChange={e => setS({ ...s, language: e.target.value })}>
-              <option value="es">Español</option>
-              <option value="en">English</option>
-            </select>
-          </div>
-          <label className="flex cursor-pointer items-center gap-2 text-sm">
-            <input type="checkbox" checked={s.autosave} aria-label="Autoguardado de generaciones"
-              onChange={e => setS({ ...s, autosave: e.target.checked })} />
-            Autoguardar generaciones en curso
-          </label>
-        </div>
-
-        <p className="text-xs text-muted">
-          {api.isDesktop()
-            ? 'Los ajustes se guardan de verdad en la base de datos local (fichero app_settings), junto a todo lo demas.'
-            : 'En el navegador los ajustes se guardan solo en la sesion: la app de escritorio los escribe en la base de datos local.'}
-        </p>
       </div>
     </Page>
   )
@@ -882,4 +810,3 @@ export function S24Analyzer() {
     </Page>
   )
 }
-

@@ -142,8 +142,8 @@ python .claude/skills/replica-design/contrast.py replica/design/tokens.json   # 
 
 ```
 src/                    interfaz (React + TypeScript + Tailwind)
-  lib/api.ts            puente híbrido: real primero (Tauri), fake solo en el
-                        navegador de desarrollo. Ningún fallo se disfraza de éxito.
+  lib/api.ts            puente: comandos reales en Tauri; datos simulados solo
+                        en el navegador de desarrollo. Los errores no activan fallbacks.
   components/           piezas reutilizables (gráficos SVG propios, tabla de
                         veredictos, gráfico de equity)
   pages/                una pantalla por módulo

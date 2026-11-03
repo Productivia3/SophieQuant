@@ -77,31 +77,33 @@ test.describe('S21 Gestor de datos', () => {
   })
 })
 
-test.describe('S23 ajustes', () => {
-  test('S23-H1 edita y guarda ajustes persistentes en sesión', async ({ page }) => {
-    await page.goto('/#/settings')
-    await expect(page.getByLabel(/carpeta de datos/i)).toBeVisible()
-    await page.getByLabel(/carpeta de datos/i).fill('C:\\MiCarpetaQF')
-    await page.getByRole('button', { name: /guardar ajustes/i }).click()
-    await expect(page.getByText('Ajustes guardados.')).toBeVisible({ timeout: 10_000 })
-    // recargado: la carpeta editada sigue (fake guarda en memoria del módulo — el mismo JS load? NO)
-    await page.reload()
-    await expect(page.getByLabel(/carpeta de datos/i)).toBeVisible()
+test.describe('S20 Datos', () => {
+  test('S20-H1 conduce al gestor sin ofrecer descarga simulada', async ({ page }) => {
+    await page.goto('/#/data')
+    await expect(page.getByRole('button', { name: /descargar m1|fuentes de datos/i })).toHaveCount(0)
+    await page.getByRole('button', { name: /importar histórico/i }).click()
+    await expect(page).toHaveURL(/\/#\/data-manager/)
+    await expect(page.getByRole('heading', { name: /gestor de datos/i })).toBeVisible()
   })
 
-  test('S23-E1 hilos clamp 1..16 y autosave toggleable', async ({ page }) => {
+  test('S20-E1 no muestra datos ficticios si falla un comando Tauri', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, '__TAURI__', {
+        configurable: true,
+        value: { core: { invoke: () => Promise.reject(new Error('Fallo de prueba del motor')) } },
+      })
+    })
+    await page.goto('/#/data')
+    await expect(page.getByRole('alert')).toContainText('Fallo de prueba del motor')
+    await expect(page.getByText('EURUSD')).toHaveCount(0)
+  })
+})
+
+test.describe('S23 ajustes', () => {
+  test('S23-H1 muestra los metadatos de mercado que usa el motor', async ({ page }) => {
     await page.goto('/#/settings')
-    const threads = page.getByLabel(/hilos del motor/i)
-    await expect(threads).toBeVisible()
-    const autosave = page.getByRole('checkbox', { name: /autoguardado/i })
-    await expect(autosave).toBeVisible()
-    const antes = await autosave.isChecked()
-    await autosave.check()
-    await expect(autosave).toBeChecked()
-    if (antes) {
-      await autosave.uncheck()
-      await expect(autosave).not.toBeChecked()
-    }
+    await expect(page.getByRole('heading', { name: /metadatos de mercado por símbolo/i })).toBeVisible()
+    await expect(page.getByLabel(/carpeta de datos|hilos del motor|autoguardado/i)).toHaveCount(0)
   })
 })
 

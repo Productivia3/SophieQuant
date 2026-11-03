@@ -5,7 +5,7 @@ import {
   Boxes, BarChart3, Import, Settings, FlaskConical, Activity,
   Download, Repeat, FileDown, GitCompareArrows, Menu, X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../lib/api'
 
 const items = [
@@ -32,9 +32,37 @@ const items = [
 export function Shell() {
   const navigate = useNavigate()
   const [navOpen, setNavOpen] = useState(false)
+  const [appError, setAppError] = useState<string | null>(null)
   const closeNav = () => setNavOpen(false)
+
+  useEffect(() => {
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason
+      setAppError(reason instanceof Error ? reason.message : String(reason))
+      event.preventDefault()
+    }
+    const handleError = (event: ErrorEvent) => {
+      setAppError(event.message || 'Se produjo un error inesperado.')
+    }
+    window.addEventListener('unhandledrejection', handleRejection)
+    window.addEventListener('error', handleError)
+    return () => {
+      window.removeEventListener('unhandledrejection', handleRejection)
+      window.removeEventListener('error', handleError)
+    }
+  }, [])
+
   return (
     <div className="flex h-full">
+      {appError && (
+        <div role="alert" aria-live="assertive"
+          className="fixed left-1/2 top-3 z-[100] flex w-[min(90vw,720px)] -translate-x-1/2 items-start gap-3 rounded-md border border-danger/50 bg-surface p-3 text-sm text-danger shadow-pop">
+          <span className="flex-1">No se pudo completar la operación: {appError}</span>
+          <button type="button" aria-label="Cerrar mensaje de error" onClick={() => setAppError(null)}>
+            <X size={16} aria-hidden />
+          </button>
+        </div>
+      )}
       {/* drawer móvil: overlay + nav deslizante <760px; fijo desde 760px (BUG-005) */}
       {navOpen && (
         <button type="button" aria-label="Cerrar menú" onClick={closeNav}
@@ -116,8 +144,8 @@ export function Shell() {
           className="flex h-6 shrink-0 items-center gap-4 border-t border-border bg-surface px-3 text-xs text-muted">
           <span>SophieQuant 0.1 · datos locales</span>
           <span className="ml-auto flex items-center gap-1">
-            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-success" />
-            <span>{api.isDesktop() ? 'núcleo Rust conectado' : 'núcleo simulado (navegador)'}</span>
+            <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${api.isDesktop() ? 'bg-success' : 'bg-warning'}`} />
+            <span>{api.isDesktop() ? 'aplicación de escritorio' : 'núcleo simulado (navegador)'}</span>
           </span>
           <button onClick={() => navigate('/design')} className="hover:text-text">design system</button>
         </footer>

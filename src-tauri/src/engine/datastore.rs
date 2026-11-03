@@ -17,16 +17,40 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
-/// Aplica el schema una vez (idempotente: `if not exists` en todo).
+fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare(&format!("pragma table_info({table})"))?;
+    let columns = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+    drop(stmt);
+    conn.execute(
+        &format!("alter table {table} add column {column} {definition}"),
+        [],
+    )?;
+    Ok(())
+}
+
+/// Aplica el schema y migra bases de datos existentes de forma idempotente.
 pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(SCHEMA)?;
-    // Migraciones idempotentes: SQLite no admite "add column if not exists",
-    // asi que ignoramos el error cuando la columna ya existe.
-    let _ = conn.execute("alter table backtest_runs add column oos_frac real", []);
-    let _ = conn.execute("alter table strategies add column robust_score real", []);
-    let _ = conn.execute("alter table strategies add column robust_detail jsonb", []);
+    for (table, column, definition) in [
+        ("symbols", "contract_size", "real not null default 100000"),
+        ("symbols", "swap_long", "real not null default 0"),
+        ("symbols", "swap_short", "real not null default 0"),
+        ("symbols", "spread_asia", "real"),
+        ("symbols", "spread_london", "real"),
+        ("symbols", "spread_ny", "real"),
+        ("backtest_runs", "oos_frac", "real"),
+        ("strategies", "robust_score", "real"),
+        ("strategies", "robust_detail", "jsonb"),
+    ] {
+        ensure_column(conn, table, column, definition)?;
+    }
     // tabla de analisis personalizados (Custom Analysis)
-    let _ = conn.execute_batch(crate::engine::analysis::SCHEMA);
+    conn.execute_batch(crate::engine::analysis::SCHEMA)?;
     Ok(())
 }
 
@@ -512,6 +536,42 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn init_schema_migra_simbolos_anteriores_sin_perder_datos() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "create table symbols (
+                id integer primary key,
+                name text not null unique,
+                asset_class text not null,
+                exchange text,
+                tick_size real not null default 0.00001,
+                pip_size real not null default 0.0001,
+                commission real not null default 0
+            );
+            insert into symbols (id, name, asset_class, tick_size, pip_size, commission)
+            values (7, 'EURUSD', 'forex', 0.00001, 0.0001, 2.5);",
+        )
+        .unwrap();
+
+        init_schema(&conn).unwrap();
+        init_schema(&conn).unwrap();
+
+        let (name, commission, contract_size, swap_long, spread_asia): (String, f64, f64, f64, Option<f64>) =
+            conn.query_row(
+                "select name, commission, contract_size, swap_long, spread_asia
+                 from symbols where id = 7",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "EURUSD");
+        assert_eq!(commission, 2.5);
+        assert_eq!(contract_size, 100_000.0);
+        assert_eq!(swap_long, 0.0);
+        assert_eq!(spread_asia, None);
+    }
 
     /// Los veredictos se guardan y se releen: es la cache que pinta la tarjeta.
     #[test]

@@ -29,11 +29,18 @@ en esta versión.
 
 ### Comprueba que has abierto la aplicación correcta
 
-En la parte inferior de la ventana debe aparecer **«núcleo Rust conectado»**.
+En la parte inferior de la ventana debe aparecer **«aplicación de escritorio»**.
 Eso indica que estás usando la aplicación de escritorio con el motor de cálculo.
 Si aparece **«núcleo simulado (navegador)»**, estás en una vista de demostración:
 sus datos y resultados pueden ser ficticios y no debes usarlos para sacar
 conclusiones ni para exportar una estrategia.
+
+Si estás trabajando en el código del proyecto, abre **«SophieQuant (cambios del
+proyecto)»** desde el Escritorio. Ese acceso inicia la aplicación desde la
+carpeta del proyecto y refleja los cambios de interfaz al guardarlos. Los
+cambios del motor Rust pueden recompilar y reiniciar la ventana; deja abierta la
+consola que acompaña a esa versión. El acceso **«SophieQuant»** abre la versión
+instalada y no incorpora automáticamente los cambios del código.
 
 ### Qué necesitas
 
@@ -44,10 +51,9 @@ conclusiones ni para exportar una estrategia.
 - Algo de tiempo para revisar los resultados: el programa no decide por ti si
   una estrategia es adecuada.
 
-El programa no se conecta a tu bróker ni ejecuta operaciones. La función
-**«Descargar m1»** del módulo **Datos** no descarga un histórico real en esta
-versión. Para trabajar con precios reales, importa un CSV que hayas obtenido de
-tu plataforma o de una fuente de datos de confianza.
+El programa no se conecta a tu bróker ni ejecuta operaciones. No incluye una
+descarga directa de históricos: para trabajar con precios reales, importa un CSV
+que hayas obtenido de tu plataforma o de una fuente de datos de confianza.
 
 ### Cómo moverte por la aplicación
 
@@ -319,9 +325,7 @@ en esta versión; no lo uses como importador general de datos de mercado.
 8. Compara las operaciones y resultados con el backtest. Si no coinciden,
    detente e investiga la diferencia. Prueba después en demo.
 
-**Limitación conocida:** el botón **Guardar fichero…** de esta versión es una
-confirmación simulada y no guarda realmente el archivo. Copiar el código a un
-archivo `.mq4` o `.mq5` es el método disponible. SophieQuant exporta código; no
+SophieQuant muestra el código para que lo copies y lo guardes manualmente; no
 lo instala en MetaTrader ni lo activa en tu cuenta.
 
 El motor tiene tres plantillas disponibles y genera estrategias solo de compra
@@ -345,10 +349,10 @@ al generar el EA antes de comparar resultados o plantearte usarlo.
 | **Proyectos** | Encadenar pasos de análisis en un workflow sencillo. | Uso avanzado; revisa cada paso y resultado. |
 | **Cartera** | Comparar varias estrategias como conjunto. | Cuando ya tengas varias candidatas evaluadas. |
 | **Laboratorio** | Ver análisis agregados, historial y simulaciones. | Para consultar las estrategias del banco. |
-| **Datos** | Ver símbolos e históricos registrados. | Para comprobar si hay datos disponibles. La descarga mostrada es simulada en esta versión. |
+| **Datos** | Ver símbolos e históricos registrados. | Para consultar los datos cargados; usa «Importar histórico» para añadir un CSV. |
 | **Gestor de datos** | Importar CSV, crear temporalidades mayores y exportar datasets. | Para preparar históricos. |
 | **Exportar código** | Generar código MetaTrader 4 o 5. | Solo después de validar la estrategia y revisar supuestos. |
-| **Ajustes** | Ver y modificar costes y metadatos de mercado, y preferencias. | Solo si sabes los valores de tu bróker. |
+| **Ajustes** | Modificar los metadatos de mercado que usa el motor. | Solo si sabes los valores de tu bróker. |
 | **Paridad / Sistema de diseño** | Pantallas de información y diseño del propio producto. | No son necesarias para el uso de trading. |
 
 ## 11. Problemas frecuentes

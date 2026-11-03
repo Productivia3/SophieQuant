@@ -12,6 +12,7 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | case | flow | type | steps | expected | auto | result |
 | --- | --- | --- | --- | --- | --- | --- |
 | F01-H1 | generar estrategias | happy | S01 → "Nuevo build" → plantilla/TF → "Correr build" → S03 → "Ver Bank" | S03 con progreso + bank visible | e2e | ✓ |
+| F01-T1 | generar estrategias | contrato Tauri | iniciar desde S02 con `invoke` | configuración enviada dentro de `config` | e2e | ✓ |
 | F01-E1 | generar estrategias | edge: TF sin dataset | elegir d1 (solo m1 en seed) | aviso "No hay datos históricos" + enlace a Datos navega | e2e | ✓ |
 | F01-E2 | generar estrategias | edge: doble clic en "Correr build" | doble submit rápido | sin crash, aterriza en S03 | e2e | ✓ |
 | F01-E3 | generar estrategias | edge: refresh mid-build | refrescar S03 mientras el build está activo/pausado | estado y número de pasadas recuperados desde SQLite | Tauri | ✓ (build 4: paused, 15/100 tras refresh; cancelado al acabar) |
@@ -27,14 +28,15 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | F07-H1 | portfolio | happy | S18 → S19 | correlación y equity combinada | e2e | ✓ |
 | F08-H1 | exportar | happy | S22: estrategia → MT5 → "Generar código" | pre con código | e2e | ✓ |
 | F08-E1 | exportar | edge: sin estrategia | click Generar sin selección | botón disabled | e2e | ✓ |
-| F08-E2 | exportar | edge: las 6 plataformas | generar en cada una | código coherente por plataforma | e2e | ✓ |
+| F08-E2 | exportar | edge: plataformas anunciadas | generar en MT4 y MT5 | código coherente con la plataforma seleccionada | e2e | ✓ |
 | F08-N1 | exportar | negative: id inexistente | command Tauri con id=999999 | error `estrategia no encontrada`, sin export parcial | Tauri | ✓ (solo quedó el registro de la exportación válida) |
 | F08-H3 | exportar | happy: export nativo | generar MT5 desde estrategia del banco | código y verificación; command termina | Tauri | ✓ (código generado, 2046 caracteres) |
-| F09-H1 | data manager | happy | S20 → "Descargar m1" → toast | dataset badge + toast | e2e | ✓ |
+| F09-H1 | data manager | happy | S20 → "Importar histórico" | abre el Gestor de datos; no simula una descarga | e2e | ✓ |
+| F09-E1 | datos | negative: comando Tauri falla | forzar rechazo de `invoke` al abrir S20 | error visible y sin datos fake | e2e | ✓ |
 | F09-H2 | data manager + constructor + banco + exportar | happy: SQLite/QFN real | importar CSV → build → refrescar → banco → export MT5 | dataset listo, build persistido, estrategias listadas y export disponible | Tauri | ✓ (CSV sintético limpio, 800 barras; 2 estrategias; import command real) |
 | F09-E3 | data manager | edge: dialectos CSV comunes | importar separado por `;`/tab, fecha/hora separadas y decimal europeo | OHLC parseado; fecha y volumen correctos | Rust | ✓ |
-| F09-E1 | data manager | edge: descarga simultánea | dos símbolos | solo 1 activa, resto disabled | e2e | ✓ |
 | F09-E2 | data manager | edge: CSV con ruido/gaps | importer CSV | filas malas contabilizadas y saltadas | Rust | ✓ |
+| S23-H1 | ajustes | happy: metadatos de mercado | abrir S23 y consultar símbolos | muestra los campos reales editables | e2e | ✓ |
 | F10-H1 | retest | happy | S04 multi → S08 | resultados con veredicto | e2e | ✓ |
 | F11-H1 | analyzer | happy | S24 | resumen, MC de cartera y gestión de capital | e2e | ✓ |
 | X-H1 | transversal | navegación completa | rutas del Shell | sin console errors ni 5xx | e2e | ✓ (22/22) |

@@ -19,6 +19,7 @@ dist/
 npm-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.bat
 
 # ── Rust / Tauri ──────────────────────────────────────────────────────
 src-tauri/target/

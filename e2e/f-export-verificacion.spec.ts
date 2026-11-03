@@ -35,12 +35,12 @@ test.describe('Verificación del export', () => {
     expect(a11y.violations).toEqual([])
   })
 
-  test('X-H2 el codigo generado se sigue pudiendo guardar', async ({ page }) => {
+  test('X-H2 el codigo se copia y guarda manualmente, sin prometer guardado nativo', async ({ page }) => {
     await page.goto('/#/export')
     await page.locator('li button').first().click()
     await page.getByRole('button', { name: /generar código/i }).click()
     await expect(page.locator('pre')).toBeVisible({ timeout: 10_000 })
-    await page.getByRole('button', { name: /guardar fichero/i }).click()
-    await expect(page.getByText(/fichero guardado/i)).toBeVisible({ timeout: 10_000 })
+    await expect(page.getByRole('button', { name: /guardar fichero/i })).toHaveCount(0)
+    await expect(page.getByText(/copia el código y guárdalo como archivo/i)).toBeVisible()
   })
 })

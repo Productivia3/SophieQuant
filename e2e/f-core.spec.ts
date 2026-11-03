@@ -2,6 +2,55 @@
 import { test, expect } from '@playwright/test'
 import AxeConstructor from '@axe-core/playwright'
 
+async function mockBankEngine(page: import('@playwright/test').Page, computeDelay = 0) {
+  await page.addInitScript((delayMs) => {
+    const strategies = [
+      { id: 1, name: 'Alpha', symbol: 'EURUSD', timeframe: 'm1', robustScore: 60,
+        netProfit: 10, profitFactor: 1.4, winRate: 0.52, maxDD: 15, nTrades: 120, sharpe: 0.8,
+        lastRun: { equity: [100, 110], oosFrac: 0.2, status: 'done' } },
+      { id: 2, name: 'Beta', symbol: 'GBPUSD', timeframe: 'm5', robustScore: 80,
+        netProfit: 50, profitFactor: 2.1, winRate: 0.64, maxDD: 5, nTrades: 220, sharpe: 1.5,
+        lastRun: { equity: [100, 150], oosFrac: 0.2, status: 'done' } },
+      { id: 3, name: 'Gamma', symbol: 'USDJPY', timeframe: 'm15', robustScore: 30,
+        netProfit: -2, profitFactor: 0.8, winRate: 0.4, maxDD: 30, nTrades: 80, sharpe: -0.2,
+        lastRun: { equity: [100, 98], oosFrac: 0.2, status: 'done' } },
+      { id: 4, name: 'Delta', symbol: 'AAPL', timeframe: 'h1', robustScore: null,
+        netProfit: null, profitFactor: null, winRate: null, maxDD: null, nTrades: null, sharpe: null,
+        lastRun: { equity: null, oosFrac: null, status: 'done' } },
+    ]
+    Object.defineProperty(window, '__TAURI__', {
+      configurable: true,
+      value: {
+        core: {
+          invoke: async (command: string, args?: Record<string, unknown>) => {
+            if (command === 'list_bank') return strategies
+            if (command === 'get_strategy_verdicts') return { rows: [] }
+            if (command === 'compute_strategy_verdicts') {
+              await new Promise(resolve => window.setTimeout(resolve, delayMs))
+              const strategyId = (args?.strategyIds as number[])[0]
+              return {
+                rows: [{
+                  strategyId,
+                  nombre: strategies.find(strategy => strategy.id === strategyId)?.name ?? '',
+                  checks: {
+                    walkForward: { estado: 'pass', detalle: 'OK', valor: 1 },
+                    monteCarlo: { estado: 'pass', detalle: 'OK', valor: 1 },
+                    spp: { estado: 'pass', detalle: 'OK', valor: 1 },
+                    perfil: { estado: 'pass', detalle: 'OK', valor: 1 },
+                  },
+                  overall: 'pass',
+                  calculadoEn: 1,
+                }],
+              }
+            }
+            throw new Error(`Comando inesperado en prueba: ${command}`)
+          },
+        },
+      },
+    })
+  }, computeDelay)
+}
+
 test.beforeEach(async ({ page }) => {
   const errors: string[] = []
   page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
@@ -15,28 +64,65 @@ test.afterEach(async ({ page }) => {
 })
 
 test.describe('F09 data manager', () => {
-  test('F09-H1 descarga m1 con progreso y toast', async ({ page }) => {
+  test('F09-H1 desde Datos abre el gestor para importar un CSV', async ({ page }) => {
     await page.goto('/#/data')
     await expect(page.getByRole('table')).toBeVisible()
-    const btn = page.getByRole('button', { name: /descargar m1/i }).first()
-    await btn.click()
-    // al terminar: toast visible
-    await expect(page.getByRole('status').last()).toBeVisible({ timeout: 20_000 })
+    await page.getByRole('button', { name: /importar histórico/i }).click()
+    await expect(page).toHaveURL(/\/#\/data-manager/)
+    await expect(page.getByRole('heading', { name: /gestor de datos/i })).toBeVisible()
   })
 
-  test('F09-E1 solo una descarga simultánea', async ({ page }) => {
+  test('F09-E1 la pantalla Datos no ofrece descarga simulada', async ({ page }) => {
     await page.goto('/#/data')
-    const buttons = page.getByRole('button', { name: /descargar m1/i })
-    const first = buttons.first()
-    const second = buttons.nth(1)
-    await first.click()
-    // mientras busy, el resto deshabilitados
-    await expect(second).toBeDisabled()
-    await expect(page.getByRole('status').last()).toBeVisible({ timeout: 20_000 })
+    await expect(page.getByRole('button', { name: /descargar m1|fuentes de datos/i })).toHaveCount(0)
   })
 })
 
 test.describe('F01 generar estrategias', () => {
+  test('F01-T1 envía la configuración bajo la clave que requiere Tauri', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, '__TAURI__', {
+        configurable: true,
+        value: {
+          core: {
+            invoke: async (command: string, args?: Record<string, unknown>) => {
+              if (command === 'start_build') {
+                Object.assign(window, { __startBuildArgs: args })
+                return 42
+              }
+              if (command === 'list_symbols') {
+                return [{ id: 1, name: 'EURUSD', assetClass: 'forex', tickSize: 0.00001, pipSize: 0.0001, commission: 0 }]
+              }
+              if (command === 'list_data_files') {
+                return [{ id: 1, symbolId: 1, timeframe: 'm1', storageKind: 'local_qfd', compressedBytes: 1000, nBars: 500, dateFrom: 1, dateTo: 2, status: 'ready', createdAt: 1 }]
+              }
+              if (command === 'list_templates') {
+                return [{ id: 1, name: 'Base MA cross', source: 'built_in' }]
+              }
+              if (command === 'list_build_metrics') return { metrics: [], pesos: [] }
+              if (command === 'list_builds') return []
+              throw new Error(`Comando inesperado en prueba: ${command}`)
+            },
+          },
+        },
+      })
+    })
+    await page.goto('/#/build/new')
+    await page.getByRole('button', { name: /generar estrategias/i }).click()
+    await expect(page).toHaveURL(/\/#\/build\/run\/42/)
+    const args = await page.evaluate(() => (window as unknown as { __startBuildArgs: Record<string, unknown> }).__startBuildArgs)
+    expect(args).toHaveProperty('config')
+    expect(args).not.toHaveProperty('symbolId')
+    expect(args.config).toMatchObject({
+      kind: 'builder',
+      symbolId: 1,
+      timeframe: 'm1',
+      templateId: 1,
+      nTarget: 100,
+      monteCarlo: true,
+    })
+  })
+
   test('F01-H1 config → correr → S03 en marcha → bank', async ({ page }) => {
     // asegurar datos primero (fake-layer: el seed ya trae datasets)
     await page.goto('/#/build/new')
@@ -92,6 +178,31 @@ test.describe('F01 generar estrategias', () => {
 })
 
 test.describe('F02 revisar resultados', () => {
+  test('F02-H2 ordena las columnas y muestra el progreso real de los veredictos', async ({ page }) => {
+    await mockBankEngine(page, 180)
+    await page.goto('/#/bank')
+    const nombres = () => page.locator('tbody tr').evaluateAll(rows =>
+      rows.map(row => row.querySelector('td')?.textContent?.trim() ?? ''))
+
+    await expect(page.locator('tbody tr')).toHaveCount(4)
+    const alpha = page.locator('tbody tr').filter({ hasText: 'Alpha' })
+    await expect(alpha.locator('td').nth(3)).not.toHaveText('—')
+    await expect(alpha.locator('td').nth(4)).not.toHaveText('—')
+    await expect(alpha.locator('td').nth(1)).toHaveText('EURUSD')
+    const beneficio = page.getByRole('button', { name: /ordenar por beneficio neto/i })
+    await beneficio.click()
+    await expect.poll(nombres).toEqual(['Beta', 'Alpha', 'Gamma', 'Delta'])
+    await page.getByRole('button', { name: /ordenar por beneficio neto/i }).click()
+    await expect.poll(nombres).toEqual(['Gamma', 'Alpha', 'Beta', 'Delta'])
+
+    await page.getByRole('button', { name: /calcular veredictos/i }).click()
+    const progress = page.getByRole('progressbar', { name: /progreso del cálculo de veredictos/i })
+    await expect(progress).toHaveAttribute('aria-valuenow', '1')
+    await expect(page.getByText(/1 de 4.*3 restantes/i)).toBeVisible()
+    await expect(progress).toHaveAttribute('aria-valuenow', '4', { timeout: 10_000 })
+    await expect(page.getByRole('status')).toContainText('Veredictos calculados para 4 estrategias.')
+  })
+
   test('F02-H1 bank → detalle con stats y equity → volver', async ({ page }) => {
     await page.goto('/#/bank')
     const fila = page.locator('tbody tr').first()

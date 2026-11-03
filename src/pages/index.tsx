@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom'
 import {
   Play, Pause, Square, Database, Download, Wand2, ChevronRight, FileCode2,
   AlertTriangle, Info, LibraryBig, GitCompareArrows,
+  ArrowDown, ArrowUp, ArrowUpDown,
 } from 'lucide-react'
 import { api, onBuildEvent } from '../lib/api'
 import type { BuildRec, BuildStatus, Platform, StrategyRec, Timeframe } from '../lib/types'
@@ -53,6 +54,9 @@ function StatusBadge({ status }: { status: BuildStatus }) {
   const label = ({ running: 'Corriendo', done: 'Completado', paused: 'Pausado', queued: 'En cola', error: 'Error', cancelled: 'Cancelado' })[status]
   return <Badge tone={tone} label={label} />
 }
+type BankSortKey = 'name' | 'symbol' | 'tf' | 'net' | 'pf' | 'wr' | 'dd' | 'trades' | 'sharpe' | 'rob' | 'score'
+type BankSort = { key: BankSortKey; direction: 'asc' | 'desc' }
+
 function TableSkeleton({ rows = 8, height = 34 }: { rows?: number; height?: number }) {
   return (
     <div className="space-y-2 p-4" aria-label="Cargando">
@@ -161,6 +165,7 @@ export function S02BuildConfig() {
   const [dataFiles, setDataFiles] = useState<Awaited<ReturnType<typeof api.listDataFiles>>>([])
   const [templates, setTemplates] = useState<Awaited<ReturnType<typeof api.listTemplates>>>([])
   const [busy, setBusy] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
   const [form, setForm] = useState({
     symbolId: 1,
     timeframe: 'm1' as Timeframe,
@@ -190,12 +195,20 @@ export function S02BuildConfig() {
 
   async function start() {
     setBusy(true)
-    const buildId = await api.startBuild({
-      kind: 'builder', symbolId: form.symbolId, timeframe: form.timeframe,
-      nTarget: form.nTarget, templateId: form.templateId,
-      filters, minTrades: form.minTrades, porRobustez: form.porRobustez,
-    })
-    navigate(`/build/run/${buildId}`)
+    setStartError(null)
+    try {
+      const buildId = await api.startBuild({
+        kind: 'builder', symbolId: form.symbolId, timeframe: form.timeframe,
+        nTarget: form.nTarget, templateId: form.templateId,
+        filters, minTrades: form.minTrades, porRobustez: form.porRobustez,
+        monteCarlo: form.monteCarlo,
+      })
+      navigate(`/build/run/${buildId}`)
+    } catch (e) {
+      setStartError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -206,6 +219,11 @@ export function S02BuildConfig() {
         </Button>
       }>
       <form className="mx-auto max-w-3xl space-y-4 p-4" onSubmit={e => e.preventDefault()}>
+        {startError && (
+          <div className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger" role="alert">
+            No se pudo iniciar la generación: {startError}
+          </div>
+        )}
         <Section title="Datos">
           <Row label="Símbolo">
             <select className={selectCls} value={form.symbolId}
@@ -414,6 +432,8 @@ export function S04Bank() {
   const [verdicts, setVerdicts] = useState<Record<number, StrategyVerdicts>>({})
   const [calcBusy, setCalcBusy] = useState(false)
   const [calcMsg, setCalcMsg] = useState<string | null>(null)
+  const [calcProgress, setCalcProgress] = useState<{ completed: number; total: number } | null>(null)
+  const [sort, setSort] = useState<BankSort | null>(null)
 
   // veredictos ya calculados (cache) para las estrategias del banco
   useEffect(() => {
@@ -428,18 +448,65 @@ export function S04Bank() {
     return () => { alive = false }
   }, [rows])
 
+  const sortedRows = useMemo(() => {
+    if (!rows || !sort) return rows ?? []
+    const sortValue = (strategy: StrategyRec): string | number | null => {
+      const metrics = strategy.lastRun?.metrics
+      switch (sort.key) {
+        case 'name': return strategy.name
+        case 'symbol': return strategy.symbol ?? symName(strategy.symbolId)
+        case 'tf': return strategy.timeframe
+        case 'net': return metrics?.netProfit ?? null
+        case 'pf': return metrics?.profitFactor ?? null
+        case 'wr': return metrics?.winRate ?? null
+        case 'dd': return metrics?.maxDD ?? null
+        case 'trades': return metrics?.nTrades ?? null
+        case 'sharpe': return metrics?.sharpe ?? null
+        case 'rob': {
+          const overall = verdicts[strategy.id]?.overall
+          return overall === 'pass' ? 3 : overall === 'warn' ? 2 : overall === 'fail' ? 1 : 0
+        }
+        case 'score': return strategy.robustScore ?? null
+      }
+    }
+    return [...rows].sort((a, b) => {
+      const aValue = sortValue(a)
+      const bValue = sortValue(b)
+      if (aValue == null) return bValue == null ? 0 : 1
+      if (bValue == null) return -1
+      const comparison = typeof aValue === 'string' && typeof bValue === 'string'
+        ? aValue.localeCompare(bValue, 'es')
+        : Number(aValue) - Number(bValue)
+      if (comparison === 0) return a.name.localeCompare(b.name, 'es')
+      return sort.direction === 'asc' ? comparison : -comparison
+    })
+  }, [rows, sort, verdicts])
+
+  function ordenarPor(key: BankSortKey) {
+    setSort(current => {
+      if (current?.key === key) {
+        return { key, direction: current.direction === 'desc' ? 'asc' : 'desc' }
+      }
+      const ascendingFirst = key === 'name' || key === 'symbol' || key === 'tf' || key === 'dd'
+      return { key, direction: ascendingFirst ? 'asc' : 'desc' }
+    })
+  }
+
   async function calcularVerdicts() {
     if (!rows?.length || calcBusy) return
     setCalcBusy(true)
     setCalcMsg(null)
+    setCalcProgress({ completed: 0, total: rows.length })
+    let completed = 0
     try {
-      const res = await api.computeVerdicts(rows.map(r => r.id))
-      const map: Record<number, StrategyVerdicts> = {}
-      for (const v of res) map[v.strategyId] = v
-      setVerdicts(map)
-      setCalcMsg(`Veredictos calculados para ${res.length} estrategias.`)
+      await api.computeVerdicts(rows.map(r => r.id), (done, total, result) => {
+        completed = done
+        setCalcProgress({ completed: done, total })
+        setVerdicts(current => ({ ...current, [result.strategyId]: result }))
+      })
+      setCalcMsg(`Veredictos calculados para ${completed} estrategias.`)
     } catch (e) {
-      setCalcMsg(`No se pudieron calcular: ${e instanceof Error ? e.message : String(e)}`)
+      setCalcMsg(`Cálculo interrumpido (${completed} de ${rows.length} completadas): ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setCalcBusy(false)
     }
@@ -451,14 +518,43 @@ export function S04Bank() {
       icon={<LibraryBig aria-hidden size={16} />}
       actions={
         <div className="flex items-center gap-3">
-          {calcMsg && <span className="text-xs text-muted">{calcMsg}</span>}
           <span className="text-sm text-muted">{rows?.length ?? '…'} estrategias</span>
-          <Button variant="primary" size="sm" loading={calcBusy} onClick={() => void calcularVerdicts()}>
+          <Button variant="primary" size="sm" loading={calcBusy} disabled={!rows?.length} onClick={() => void calcularVerdicts()}>
             Calcular veredictos
           </Button>
         </div>
       }
     >
+      {calcProgress && (
+        <div className="mx-3 mt-3 rounded-md border border-border bg-surface p-3" aria-live="polite">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span>
+              Veredictos completados: <b className="text-text">{calcProgress.completed} de {calcProgress.total}</b>
+              {' · '}{calcProgress.total - calcProgress.completed} restantes
+            </span>
+            <span className="text-muted">{calcProgress.total ? Math.round(calcProgress.completed / calcProgress.total * 100) : 100}%</span>
+          </div>
+          <div
+            className="h-2 overflow-hidden rounded-full bg-surface-raised"
+            role="progressbar"
+            aria-label="Progreso del cálculo de veredictos"
+            aria-valuemin={0}
+            aria-valuemax={calcProgress.total}
+            aria-valuenow={calcProgress.completed}
+          >
+            <div
+              className="h-full rounded-full bg-accent transition-[width]"
+              style={{ width: `${calcProgress.total ? calcProgress.completed / calcProgress.total * 100 : 100}%` }}
+            />
+          </div>
+          {calcMsg && (
+            <p className={`mt-2 text-xs ${calcMsg.startsWith('Cálculo interrumpido') ? 'text-danger' : 'text-muted'}`}
+              role={calcMsg.startsWith('Cálculo interrumpido') ? 'alert' : 'status'}>
+              {calcMsg}
+            </p>
+          )}
+        </div>
+      )}
       {!rows ? <TableSkeleton /> : rows.length === 0 ? (
         <EmptyState title="El banco está vacío"
           hint="Genera tu primera tanda: el motor dejará aquí las estrategias que pasen los filtros."
@@ -468,11 +564,23 @@ export function S04Bank() {
           <table className="w-full min-w-[900px] text-sm">
           <thead>
             <tr className="bg-surface text-left text-xs text-muted">
-              {cols.map(c => <th key={c.key} className="px-3 py-2 font-medium">{c.label}</th>)}
+              {cols.map(c => (
+                <th key={c.key} className="px-3 py-2 font-medium"
+                  aria-sort={sort?.key === c.key ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                  <button type="button" className="inline-flex items-center gap-1 hover:text-text"
+                    onClick={() => ordenarPor(c.key)}
+                    aria-label={`Ordenar por ${c.label}${sort?.key === c.key ? sort.direction === 'asc' ? ', ascendente' : ', descendente' : ''}`}>
+                    {c.label}
+                    {sort?.key === c.key
+                      ? sort.direction === 'asc' ? <ArrowUp size={13} aria-hidden /> : <ArrowDown size={13} aria-hidden />
+                      : <ArrowUpDown size={13} aria-hidden className="opacity-50" />}
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {rows.map(s => {
+            {sortedRows.map(s => {
               const m = s.lastRun?.metrics
               return (
                 <tr key={s.id} className="cursor-pointer hover:bg-surface-raised"
@@ -485,7 +593,7 @@ export function S04Bank() {
                       {s.name}
                     </span>
                   </td>
-                  <td className="px-3 py-2 font-mono">{symName(s.symbolId)}</td>
+                  <td className="px-3 py-2 font-mono">{s.symbol ?? symName(s.symbolId)}</td>
                   <td className="px-3 py-2 font-mono text-muted">{s.timeframe}</td>
                   <td className={`px-3 py-2 text-right font-mono ${(m?.netProfit ?? 0) >= 0 ? 'text-success' : 'text-danger'}`}>
                     {fmtMoney(m?.netProfit)}
@@ -717,33 +825,17 @@ export function S05Strategy() {
 export function S20Data() {
   const [symbols, setSymbols] = useState<Awaited<ReturnType<typeof api.listSymbols>>>([])
   const [files, setFiles] = useState<Awaited<ReturnType<typeof api.listDataFiles>>>([])
-  const [busy, setBusy] = useState<number | null>(null)
-  const [progress, setProgress] = useState(0)
-  const [toast, setToast] = useState<string | null>(null)
+  const navigate = useNavigate()
 
   useEffect(() => { api.listSymbols().then(setSymbols); api.listDataFiles().then(setFiles) }, [])
 
-  async function download(symbolId: number) {
-    setBusy(symbolId); setProgress(0)
-    try {
-      await api.downloadData(symbolId, 'm1', Date.now() - 2 * 365 * 86_400_000, Date.now(), setProgress)
-      setFiles(await api.listDataFiles())
-      setToast(`Histórico descargado para ${symName(symbolId)}`)
-      setTimeout(() => setToast(null), 3500)
-    } finally {
-      setBusy(null)
-    }
-  }
-
   return (
     <Page title="Datos históricos" icon={<Database size={16} />}
-      actions={<Button size="sm" variant="secondary"><Download size={14} aria-hidden /> Fuentes de datos</Button>}>
-      {toast && (
-        <div role="status"
-          className="absolute right-4 top-14 rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success shadow-pop">
-          {toast}
-        </div>
-      )}
+      actions={
+        <Button size="sm" variant="secondary" onClick={() => navigate('/data-manager')}>
+          Importar histórico
+        </Button>
+      }>
       <div className="overflow-x-auto qf-scroll">
         <table className="w-full min-w-[720px] text-sm">
           <thead>
@@ -771,10 +863,9 @@ export function S20Data() {
                       ))}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <Button size="sm" loading={busy === s.id} disabled={busy != null && busy !== s.id}
-                      onClick={() => download(s.id)}>
-                      {busy === s.id ? `${Math.round(progress * 100)}%` : (<><Download size={13} aria-hidden /> Descargar m1</>)}
-                    </Button>
+                    <span className="text-xs text-muted">
+                      {ds.length ? 'Históricos disponibles' : 'Importa un CSV desde el gestor de datos'}
+                    </span>
                   </td>
                 </tr>
               )
@@ -802,15 +893,22 @@ export function S22Export() {
   const [code, setCode] = useState<string | null>(null)
   const [verif, setVerif] = useState<ExportVerificacion | null>(null)
   const [busy, setBusy] = useState(false)
-  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { api.listBank({}).then(setRows) }, [])
 
   async function generate() {
     if (!sel) return
-    setBusy(true); setCode(null); setSaved(false)
-    const out = await api.exportStrategy(sel.id, platform)
-    setCode(out.code); setVerif(out.verificacion); setBusy(false)
+    setBusy(true); setCode(null); setVerif(null); setError(null)
+    try {
+      const out = await api.exportStrategy(sel.id, platform)
+      setCode(out.code)
+      setVerif(out.verificacion)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -827,7 +925,7 @@ export function S22Export() {
                   <li key={r.id}>
                     <button
                       className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-raised ${sel?.id === r.id ? 'bg-surface-raised' : ''}`}
-                      onClick={() => { setSel(r); setCode(null); setSaved(false) }}
+                      onClick={() => { setSel(r); setCode(null); setVerif(null); setError(null) }}
                       aria-pressed={sel?.id === r.id}>
                       <span className="flex-1 truncate">{r.name}</span>
                       <span className="font-mono text-xs text-muted">{fmtMoney(r.lastRun?.metrics?.netProfit)}</span>
@@ -858,6 +956,7 @@ export function S22Export() {
           <Button variant="primary" className="mt-4" loading={busy} disabled={!sel} onClick={generate}>
             <Play size={14} aria-hidden /> Generar código
           </Button>
+          {error && <p className="mt-2 text-sm text-danger" role="alert">{error}</p>}
         </div>
 
         <div className="flex min-h-0 flex-col">
@@ -889,11 +988,9 @@ export function S22Export() {
                   </p>
                 </div>
               )}
-              <Button className="mt-2" variant="secondary"
-                onClick={async () => { await api.saveExportFile(`${sel!.name}.${platform}`, code); setSaved(true) }}>
-                <Download size={14} aria-hidden /> Guardar fichero…
-              </Button>
-              {saved && <p role="status" className="mt-1 text-xs text-success">Fichero guardado (fake).</p>}
+              <p className="mt-2 text-xs text-muted">
+                Copia el código y guárdalo como archivo .mq4 o .mq5 para abrirlo en MetaEditor.
+              </p>
             </>
           ) : (
             <div className="flex flex-1 items-center justify-center rounded-md border border-border bg-surface text-sm text-muted">

@@ -108,15 +108,6 @@ function emit(e: WorkstepEvent) { listeners.forEach(l => l(e)) }
 
 // ── implementación fake ────────────────────────────────────────────
 
-const appSettings: AppSettings = {
-  dataDir: 'C:\\SophieQuantData',
-  proxy: '',
-  theme: 'dark',
-  language: 'es',
-  autosave: true,
-  engineThreads: 4,
-}
-
 const db = {
   symbols: symbolsSeed,
   dataFiles: dataFilesSeed,
@@ -130,7 +121,7 @@ const db = {
 
 const delay = (ms = 220) => new Promise(r => setTimeout(r, ms))
 
-// ── puente Tauri: invoke real si existe la API global; si no, undefined ──
+// ── puente Tauri: los datos fake solo se usan en el navegador de desarrollo ──
 type TauriGlobal = {
   __TAURI__?: {
     core?: { invoke?: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> }
@@ -141,35 +132,56 @@ function isTauri(): boolean {
 }
 async function real<T>(cmd: string, args?: Record<string, unknown>): Promise<T | undefined> {
   if (!isTauri()) return undefined
-  try {
-    const t = (window as unknown as TauriGlobal).__TAURI__
-    const inv = t?.core?.invoke
-    if (!inv) return undefined
-    return await inv<T>(cmd, args)
-  } catch (err) {
-    console.warn(`[sophiequant] command ${cmd} falló — fallback a fake:`, err)
-    return undefined
-  }
+  const inv = (window as unknown as TauriGlobal).__TAURI__?.core?.invoke
+  if (!inv) throw new Error('La comunicación con el motor de SophieQuant no está disponible.')
+  const result = await inv<T>(cmd, args)
+  if (result == null) throw new Error(`El comando ${cmd} no devolvió ningún resultado.`)
+  return result
 }
 
-/// invoke que NO se traga los errores: para acciones donde caer en un fake
-/// silencioso haria creer al usuario que algo se ha guardado o importado.
+async function realNullable<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null | undefined> {
+  if (!isTauri()) return undefined
+  const inv = (window as unknown as TauriGlobal).__TAURI__?.core?.invoke
+  if (!inv) throw new Error('La comunicación con el motor de SophieQuant no está disponible.')
+  return await inv<T | null>(cmd, args)
+}
+
+async function realVoid(cmd: string, args?: Record<string, unknown>): Promise<boolean> {
+  if (!isTauri()) return false
+  const inv = (window as unknown as TauriGlobal).__TAURI__?.core?.invoke
+  if (!inv) throw new Error('La comunicación con el motor de SophieQuant no está disponible.')
+  await inv<void>(cmd, args)
+  return true
+}
+
 async function realStrict<T>(cmd: string, args?: Record<string, unknown>): Promise<T | undefined> {
   if (!isTauri()) return undefined
-  const t = (window as unknown as TauriGlobal).__TAURI__
-  const inv = t?.core?.invoke
-  if (!inv) return undefined
-  return await inv<T>(cmd, args)   // el error sube hasta la UI
+  const inv = (window as unknown as TauriGlobal).__TAURI__?.core?.invoke
+  if (!inv) throw new Error('La comunicación con el motor de SophieQuant no está disponible.')
+  const result = await inv<T>(cmd, args)
+  if (result == null) throw new Error(`El comando ${cmd} no devolvió ningún resultado.`)
+  return result
 }
 
 // Normalización del shape de Rust → shape del front
 function normBankRow(r: Record<string, unknown>): StrategyRec {
   // list_bank devuelve { lastRun: {...} }; get_strategy devuelve metrics/equity en la raiz
-  const last = (r.lastRun ?? {
+  const rawLast = r.lastRun
+  const last = (rawLast ?? {
     equity: (r.equity as number[] | null | undefined) ?? null,
     oosFrac: (r.oosFrac as number | null | undefined) ?? null,
-  }) as { equity?: number[] | null; status?: string; oosFrac?: number | null }
-  const m = (r.metrics ?? null) as Metrics | null
+  }) as { equity?: number[] | null; status?: string; oosFrac?: number | null; metrics?: Metrics | null }
+  const flatMetrics = {
+    netProfit: r.netProfit,
+    profitFactor: r.profitFactor,
+    winRate: r.winRate,
+    maxDD: r.maxDD,
+    sharpe: r.sharpe,
+    nTrades: r.nTrades,
+  }
+  const hasFlatMetrics = Object.values(flatMetrics).some(value => value != null)
+  const nestedMetrics = r.metrics ?? last.metrics
+  const m = (nestedMetrics ?? (hasFlatMetrics ? flatMetrics : null)) as Metrics | null
   return {
     id: r.id as number,
     name: r.name as string,
@@ -204,20 +216,7 @@ export const api = {
   },
   async listDataFiles(): Promise<DataFileRec[]> {
     const r = await real<DataFileRec[]>('list_data_files')
-    if (r) return r.map((d: any) => ({ ...d, symbolId: d.symbolId ?? d.symbolId }))
-    return [...db.dataFiles]
-  },
-  async downloadData(symbolId: number, tf: Timeframe, from: number, to: number, onProgress?: (p: number) => void): Promise<DataFileRec> {
-    // fake: simulación de descarga con progreso
-    await delay(150)
-    for (let p = 0.05; p <= 1; p += 0.1) { await delay(140); onProgress?.(Math.min(p, 1)) }
-    const df: DataFileRec = {
-      id: db.dataFiles.length + 1, symbolId, timeframe: tf, storageKind: 'dukascopy',
-      compressedBytes: Math.floor(50e6 + Math.random() * 400e6), nBars: Math.floor(2e6 + Math.random() * 20e6),
-      dateFrom: from, dateTo: to, status: 'ready', createdAt: Date.now(),
-    }
-    db.dataFiles.push(df)
-    return df
+    return r ?? [...db.dataFiles]
   },
 
   // templates
@@ -236,21 +235,25 @@ export const api = {
     filters?: MetricFilter[]
     minTrades?: number
     porRobustez?: boolean
+    monteCarlo?: boolean
+    nIterations?: number
   }): Promise<number> {
     const r = await real<number>('start_build', {
-      kind: 'builder',
-      symbolId: cfg.symbolId,
-      timeframe: cfg.timeframe,
-      templateId: cfg.templateId ?? 1,
-      nTarget: cfg.nTarget,
-      filters: cfg.filters ?? [
-        { metric: 'profitFactor', op: '>=', value: 1.15 },
-        { metric: 'maxDD', op: '<=', value: 35 },
-      ],
-      minTrades: cfg.minTrades ?? 20,
-      porRobustez: cfg.porRobustez ?? true,
-      monteCarlo: true,
-      nIterations: 4000,
+      config: {
+        kind: cfg.kind,
+        symbolId: cfg.symbolId,
+        timeframe: cfg.timeframe,
+        templateId: cfg.templateId ?? 1,
+        nTarget: cfg.nTarget,
+        filters: cfg.filters ?? [
+          { metric: 'profitFactor', op: '>=', value: 1.15 },
+          { metric: 'maxDD', op: '<=', value: 35 },
+        ],
+        minTrades: cfg.minTrades ?? 20,
+        porRobustez: cfg.porRobustez ?? true,
+        monteCarlo: cfg.monteCarlo ?? true,
+        nIterations: cfg.nIterations ?? 4000,
+      },
     })
     if (r != null) return r
     await delay(120)
@@ -282,9 +285,9 @@ export const api = {
     })()
     return id
   },
-  async pauseBuild(id: number): Promise<void> { const ran = await real('pause_build', { id }); if (ran !== undefined) return; const b = db.builds.find(x => x.id === id); if (b) b.status = 'paused'; await delay(60) },
-  async resumeBuild(id: number): Promise<void> { const ran = await real('resume_build', { id }); if (ran !== undefined) return; const b = db.builds.find(x => x.id === id); if (b) { b.status = 'running'; await delay(60); } },
-  async cancelBuild(id: number): Promise<void> { await real('cancel_build'); const b = db.builds.find(x => x.id === id); if (b) { b.status = 'cancelled'; b.finishedAt = Date.now(); await delay(60) } },
+  async pauseBuild(id: number): Promise<void> { if (await realVoid('pause_build', { id })) return; const b = db.builds.find(x => x.id === id); if (b) b.status = 'paused'; await delay(60) },
+  async resumeBuild(id: number): Promise<void> { if (await realVoid('resume_build', { id })) return; const b = db.builds.find(x => x.id === id); if (b) { b.status = 'running'; await delay(60); } },
+  async cancelBuild(id: number): Promise<void> { if (await realVoid('cancel_build')) return; const b = db.builds.find(x => x.id === id); if (b) { b.status = 'cancelled'; b.finishedAt = Date.now(); await delay(60) } },
   async listBuilds(): Promise<BuildRec[]> {
     const r = await real<BuildRec[]>('list_builds')
     return r ?? [...db.builds].reverse()
@@ -303,8 +306,9 @@ export const api = {
       .sort((a, b) => (b.lastRun?.metrics?.netProfit ?? -1e9) - (a.lastRun?.metrics?.netProfit ?? -1e9))
   },
   async getStrategy(id: number): Promise<StrategyRec | null> {
-    const r = await real<Record<string, unknown>>('get_strategy', { id })
+    const r = await realNullable<Record<string, unknown>>('get_strategy', { id })
     if (r) return normBankRow(r)
+    if (isTauri()) return null
     await delay(90)
     return db.strategies.find(s => s.id === id) ?? null
   },
@@ -646,12 +650,6 @@ export const api = {
       },
     }
   },
-  async saveExportFile(fileName: string, code: string): Promise<boolean> {
-    await delay(80) // en fake: solo confirma
-    void fileName; void code
-    return true
-  },
-
   // ── Fase 4: profile de optimización · resultados de cartera ·
   // quant data manager · ajustes · analyzer (fake) ──
 
@@ -1170,34 +1168,39 @@ export const api = {
     }))
   },
 
-  /** Calcula los cuatro veredictos con el motor real y los guarda. */
-  async computeVerdicts(strategyIds: number[]): Promise<StrategyVerdicts[]> {
-    const r = await real<{ rows: StrategyVerdicts[] }>('compute_strategy_verdicts', { strategyIds })
-    if (r?.rows) return r.rows
-    await delay(600)
-    return strategyIds.map(id => ({
-      strategyId: id,
-      nombre: db.strategies.find(s => s.id === id)?.name ?? `#${id}`,
-      checks: {
-        walkForward: { estado: 'warn' as const, detalle: 'WFE 48.2 % · umbral 50 %', valor: 48.2 },
-        monteCarlo: { estado: 'pass' as const, detalle: '9/9 pruebas superadas', valor: 1 },
-        spp: { estado: 'pass' as const, detalle: 'impacto máximo 6.4 %', valor: 6.4 },
-        perfil: { estado: 'warn' as const, detalle: 'unimodal · zona estable 12.0–24.0', valor: 12 },
-      },
-      overall: 'warn' as const,
-      calculadoEn: Math.floor(Date.now() / 1000),
-    }))
-  },
-
-  async getSettings(): Promise<AppSettings> {
-    await delay(150)
-    return { ...appSettings }
-  },
-
-  async updateSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
-    await delay(250)
-    Object.assign(appSettings, patch)
-    return { ...appSettings }
+  /** Calcula los veredictos de forma secuencial para informar el progreso real. */
+  async computeVerdicts(
+    strategyIds: number[],
+    onProgress?: (completed: number, total: number, result: StrategyVerdicts) => void,
+  ): Promise<StrategyVerdicts[]> {
+    const rows: StrategyVerdicts[] = []
+    for (const id of strategyIds) {
+      let result: StrategyVerdicts
+      if (isTauri()) {
+        const response = await real<{ rows: StrategyVerdicts[] }>(
+          'compute_strategy_verdicts', { strategyIds: [id] })
+        const row = response?.rows.find(verdict => verdict.strategyId === id)
+        if (!row) throw new Error(`El motor no devolvió el veredicto de la estrategia ${id}.`)
+        result = row
+      } else {
+        await delay(80)
+        result = {
+          strategyId: id,
+          nombre: db.strategies.find(s => s.id === id)?.name ?? `#${id}`,
+          checks: {
+            walkForward: { estado: 'warn', detalle: 'WFE 48.2 % · umbral 50 %', valor: 48.2 },
+            monteCarlo: { estado: 'pass', detalle: '9/9 pruebas superadas', valor: 1 },
+            spp: { estado: 'pass', detalle: 'impacto máximo 6.4 %', valor: 6.4 },
+            perfil: { estado: 'warn', detalle: 'unimodal · zona estable 12.0–24.0', valor: 12 },
+          },
+          overall: 'warn',
+          calculadoEn: Math.floor(Date.now() / 1000),
+        }
+      }
+      rows.push(result)
+      onProgress?.(rows.length, strategyIds.length, result)
+    }
+    return rows
   },
 
   async runPortfolioMc(strategyIds: number[]): Promise<PortfolioMcResult> {
@@ -1529,14 +1532,6 @@ export interface PortfolioResults {
     sharpe: number
     diversification: number   // 0..1, cuánta DD se evitó por diversificar
   }
-}
-export interface AppSettings {
-  dataDir: string
-  proxy: string
-  theme: 'dark' | 'light'
-  language: string
-  autosave: boolean
-  engineThreads: number
 }
 export interface PortfolioMcResult {
   trials: number
