@@ -201,7 +201,7 @@ export function S02BuildConfig() {
         kind: 'builder', symbolId: form.symbolId, timeframe: form.timeframe,
         nTarget: form.nTarget, templateId: form.templateId,
         filters, minTrades: form.minTrades, porRobustez: form.porRobustez,
-        monteCarlo: form.monteCarlo,
+        monteCarlo: form.porRobustez || form.monteCarlo,
       })
       navigate(`/build/run/${buildId}`)
     } catch (e) {
@@ -303,12 +303,12 @@ export function S02BuildConfig() {
           </p>
         </Section>
 
-        <Section title="Selección y robustez">
-          <Row label="Ordenar por">
+        <Section title="Filtro de robustez estricta">
+          <Row label="Criterio">
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.porRobustez} aria-label="Ordenar por robustez"
+              <input type="checkbox" checked={form.porRobustez} aria-label="Exigir robustez estricta"
                 onChange={e => setForm({ ...form, porRobustez: e.target.checked })} />
-              <span>Robustez en vez de beneficio</span>
+              <span>Exigir robustez estricta</span>
             </label>
           </Row>
           <Row label="Operaciones mínimas">
@@ -316,13 +316,20 @@ export function S02BuildConfig() {
               value={form.minTrades} onChange={e => setForm({ ...form, minTrades: +e.target.value })} />
           </Row>
           <Row label="Monte Carlo integrado">
-            <input type="checkbox" checked={form.monteCarlo} aria-label="Monte Carlo integrado"
+            <input type="checkbox" checked={form.porRobustez || form.monteCarlo}
+              disabled={form.porRobustez} aria-label="Monte Carlo integrado"
               onChange={e => setForm({ ...form, monteCarlo: e.target.checked })} />
+            {form.porRobustez && <span className="text-xs text-muted">obligatorio en modo estricto</span>}
           </Row>
           {form.porRobustez && pesos.length > 0 && (
             <div className="mt-2 rounded-md border border-border bg-surface-raised p-2">
               <p className="mb-1 text-xs font-semibold text-muted">
-                Score de robustez: gana la estrategia que aguanta, no la que más gana
+                Solo se guardan las que pasan todos los criterios
+              </p>
+              <p className="mb-1 text-xs text-muted">
+                OOS ≥ 30 operaciones, WFE ≥ 50 %, Monte Carlo 6/6, todas las pruebas SPP en PASS
+                y meseta en cada parámetro activo. Si ninguna cumple, no se guarda ninguna.
+                El score solo ordena las calificadas.
               </p>
               <ul className="space-y-0.5">
                 {pesos.map(w => (
@@ -519,7 +526,7 @@ export function S04Bank() {
       actions={
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted">{rows?.length ?? '…'} estrategias</span>
-          <Button variant="primary" size="sm" loading={calcBusy} disabled={!rows?.length} onClick={() => void calcularVerdicts()}>
+          <Button variant="primary" size="sm" loading={calcBusy} disabled={!rows?.length || !api.isDesktop()} onClick={() => void calcularVerdicts()}>
             Calcular veredictos
           </Button>
         </div>
@@ -554,6 +561,11 @@ export function S04Bank() {
             </p>
           )}
         </div>
+      )}
+      {!api.isDesktop() && (
+        <p className="mx-3 mt-3 text-xs text-warning" role="status">
+          Los veredictos requieren la aplicación de escritorio; el navegador no calcula ni inventa resultados de robustez.
+        </p>
       )}
       {!rows ? <TableSkeleton /> : rows.length === 0 ? (
         <EmptyState title="El banco está vacío"

@@ -22,6 +22,7 @@ const CHECKS = ['walkForward', 'monteCarlo', 'spp', 'perfil'] as const
  * prueba se paso, cual no, y con que numero.
  */
 export function VerdictCard({ strategyIds, title = 'Veredictos de robustez', canCompute = true, className }: Props) {
+  const desktopAvailable = api.isDesktop()
   const [rows, setRows] = useState<StrategyVerdicts[]>([])
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -50,9 +51,9 @@ export function VerdictCard({ strategyIds, title = 'Veredictos de robustez', can
       <header className="mb-2 flex items-center gap-2">
         <h2 className="text-sm font-semibold text-muted">{title}</h2>
         <span className="text-xs text-muted">
-          Walk-forward ≥ 50 % · Monte Carlo 9/9 · SPP sin fallo · Perfil con meseta
+          OOS ≥ 30 trades · Walk-forward ≥ 50 % · Monte Carlo 6/6 · SPP todo PASS · meseta en parámetros activos
         </span>
-        {canCompute && (
+        {canCompute && desktopAvailable && (
           <Button
             variant="primary"
             size="sm"
@@ -66,11 +67,17 @@ export function VerdictCard({ strategyIds, title = 'Veredictos de robustez', can
       </header>
 
       {msg && <p className="mb-2 text-xs text-muted">{msg}</p>}
+      {!desktopAvailable && (
+        <p className="mb-2 text-xs text-warning" role="status">
+          El veredicto requiere la aplicación de escritorio; el navegador no calcula ni inventa resultados de robustez.
+        </p>
+      )}
 
       {!loaded && !busy && (
         <p className="py-3 text-sm text-muted">
-          Todavía no hay veredictos calculados para estas estrategias. Pulsa «Calcular veredictos»
-          para correr las cuatro pruebas con el motor real.
+          Todavía no hay veredictos calculados para estas estrategias. {desktopAvailable
+            ? 'Pulsa «Calcular veredictos» para correr las cuatro pruebas con el motor real.'
+            : 'Abre SophieQuant de escritorio para ejecutar las comprobaciones reales.'}
         </p>
       )}
 

@@ -165,6 +165,27 @@ en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe m�
 - Evidence: error reportado por el usuario: `CSV con solo 0 barras útiles (49533 descartadas)`; los dialectos representativos quedaron cubiertos con pruebas de regresión.
 - Status: **fixed** — detecta coma, punto y coma o tabulador; reconoce cabeceras OHLC y columnas de fecha/hora separadas; acepta coma decimal con separador `;` y fechas DMY.
 
+### BUG-015: Monte Carlo mostraba resultados engañosos y una tasa de shuffle tautológica
+
+- Severity: S2 (los resultados podían presentarse como fiables aunque varias opciones no simulaban lo que decían).
+- Flow / case: F13 / F13-H1.
+- Steps: ejecutar Monte Carlo en una estrategia rentable y comparar shuffle, drawdown y opciones de reconstrucción.
+- Expected: cada perturbación cambia la magnitud analizada, el resultado explica métrica/unidad e iteraciones, y los tipos no implementados no se muestran como cálculos reales.
+- Actual: shuffle medía solo beneficio neto, invariante al orden de trades; algunas opciones no implementadas caían en un jitter genérico ±8%; las cifras se rotulaban como PF aunque eran beneficio neto o drawdown; el navegador generaba resultados sintéticos.
+- Evidence: pruebas Rust reproducen el drawdown al agrupar pérdidas y rechazan `use_variants`; `e2e/f-montecarlo.spec.ts` verifica el contrato real, unidad y bloqueo de resultados simulados en navegador.
+- Status: **fixed** — shuffle y bootstrap drawdown evalúan DD completo, skip-certain elimina un bloque contiguo, quedan visibles solo seis pruebas implementadas, se reportan métrica/iteraciones/unidades y se desactiva Monte Carlo en navegador. Se conserva `spawn_blocking` sin retener SQLite.
+- Pendiente de comprobación manual: comparar resultados de una estrategia real en la ventana Tauri; el porcentaje depende de trades y perturbación y puede ser 100 % en una muestra de 100 iteraciones, pero ya no por conservar el beneficio al barajar.
+
+### BUG-016: la selección y los veredictos no exigían evidencia completa de robustez
+
+- Severity: S2 (podía presentar como robusta una estrategia sin superar todos los controles).
+- Flow / case: F01 / robustez estricta; F05 / SPP; veredictos.
+- Steps: generar estrategias con el filtro de robustez activo; revisar las pruebas SPP, el perfil de parámetros y el score del banco.
+- Expected: solo calificar si la búsqueda usa IS, hay al menos 30 operaciones OOS, WFE ≥50%, todas las pruebas MC y SPP pasan y cada parámetro activo presenta una meseta; advertencias, pendientes y evidencia de otro dataset no califican.
+- Actual: el score podía actuar como ordenación en vez de requisito; algunas pruebas SPP no medían degradación real y ciertos estados no aprobados podían contarse como PASS. El navegador también podía mostrar resultados calculados de forma simulada y conservar veredictos antiguos.
+- Evidence: cobertura Rust en `src-tauri/src/engine/robust.rs`, `ops.rs`, `verdicts.rs` y `genetic.rs`; pruebas e2e en `e2e/f-filters.spec.ts`, `e2e/f-phase3.spec.ts`, `e2e/f-verdicts.spec.ts` y `e2e/f-historial.spec.ts`.
+- Status: **fixed with strict, fail-closed qualification** — se excluyen candidatos que no pasen cada requisito; las advertencias/pendientes no califican; los resultados web simulados están bloqueados; los cachés de versión anterior y los scores de otro dataset no se sirven. La calificación reduce falsos positivos, pero no demuestra rentabilidad futura. Falta validar en la ventana Tauri con un dataset real.
+
 ### Límite manual restante
 
 - No se automatizó el diálogo nativo de selección de fichero ni se usaron datos personales. La importación se verificó llamando al command Tauri real con un CSV sintético de 800 barras.

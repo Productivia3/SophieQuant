@@ -65,14 +65,11 @@ test.describe('F04 optimizer + 3D', () => {
 })
 
 test.describe('F05 SPP', () => {
-  test('F05-H1 corre SPP y lista pruebas con impacto', async ({ page }) => {
+  test('F05-E1 el navegador no ofrece resultados SPP simulados', async ({ page }) => {
     await page.goto('/#/robustness')
-    await page.getByRole('button', { name: /correr spp/i }).click()
-    await expect(page.getByText(/permutaciones que rompen|dependencias frágiles/i)).toBeVisible({ timeout: 15_000 })
-    const items = page.locator('ul li')
-    await expect(items.first()).toBeVisible()
-    const body = await page.locator('body').textContent()
-    expect(body).toMatch(/entradas revertidas/i)
+    await expect(page.getByRole('button', { name: /correr spp/i })).toBeDisabled()
+    await expect(page.getByRole('status')).toContainText(/requiere la aplicación de escritorio/i)
+    await expect(page.getByText(/sin dependencias frágiles detectadas/i)).toHaveCount(0)
   })
 })
 

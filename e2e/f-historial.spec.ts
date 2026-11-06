@@ -16,24 +16,14 @@ test.afterEach(async ({ page }) => {
 })
 
 test.describe('Historial de análisis', () => {
-  test('H-H1 correr un análisis deja registro en el historial', async ({ page }) => {
-    // el detalle de la estrategia
-    await page.goto('/#/strategy/3')
-    await expect(page.getByRole('heading', { name: /historial de analisis/i })).toBeVisible()
-
-    // correr un SPP: es el análisis más rápido de la app
+  test('H-E1 el navegador no crea una entrada SPP sin ejecutar el análisis nativo', async ({ page }) => {
     await page.goto('/#/robustness')
-    await page.getByRole('button', { name: /correr spp/i }).click()
-    await expect(page.getByText(/entradas revertidas/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: /correr spp/i })).toBeDisabled()
+    await expect(page.getByRole('status')).toContainText(/requiere la aplicación de escritorio/i)
 
-    // el historial del Laboratorio lo recoge
     await page.goto('/#/analyzer')
     await page.getByRole('tab', { name: /historial/i }).click()
-    await expect(page.getByRole('heading', { name: /historial de analisis/i })).toBeVisible()
-    // la corrida de SPP queda registrada con su tipo y su veredicto
-    const tabla = page.getByRole('table')
-    await expect(tabla).toBeVisible()
-    await expect(tabla.getByText(/permutaciones \(spp\)/i)).toBeVisible()
+    await expect(page.getByText(/todavia no hay analisis registrados/i)).toBeVisible()
   })
 
   test('H-H2 el historial se puede filtrar por tipo', async ({ page }) => {

@@ -156,8 +156,9 @@ información nueva ni sirve para convertir barras grandes en pequeñas.
 5. Deja inicialmente **Estrategias objetivo**, **Operaciones mínimas** y los
    filtros en sus valores predeterminados. Los filtros iniciales son un factor
    de beneficio mínimo de 1,15 y un drawdown máximo del 35 %.
-6. Deja activado **Robustez en vez de beneficio** si prefieres ordenar por
-   resistencia a las pruebas, no solo por beneficio.
+6. Deja activado **Exigir robustez estricta** para que el Constructor solo
+   guarde estrategias que superen todas las comprobaciones; el score solo las
+   ordena después.
 7. Pulsa **Generar estrategias**.
 
 La pantalla de generación muestra el estado, el número de estrategias pasadas y
@@ -169,10 +170,21 @@ el registro de actividad. Puedes:
 - **Ver Banco de estrategias** para abrir los resultados guardados.
 
 El progreso se guarda localmente y puede recuperarse si refrescas la ventana. Si
-el banco queda vacío, no significa necesariamente que el programa se haya roto:
-puede que ninguna candidata cumpliera todos los filtros. Revisa el registro y,
-si necesitas una búsqueda más amplia, cambia un criterio cada vez para saber
-qué efecto tuvo.
+la robustez estricta está activada, solo se guardan candidatas con al menos 30
+operaciones OOS, WFE ≥ 50 %, Monte Carlo 6/6, todas las pruebas SPP en PASS y
+una meseta en cada parámetro activo. Si no hay candidatas que cumplan todo, el
+banco puede quedar vacío; el registro indica cuántas se excluyeron. Desactivar
+el filtro permite guardar candidatas que no han demostrado esos criterios, y no
+deben interpretarse como robustas.
+
+Con el modo estricto, la búsqueda de parámetros se limita al 60 % inicial de
+las barras y la validación walk-forward usa el 40 % final, que debe aportar al
+menos 30 operaciones. El perfil se calcula sobre el tramo de búsqueda y examina
+cada parámetro activo. Los veredictos antiguos se invalidan. En estrategias
+generadas con métodos anteriores, recalcular no convierte el histórico de
+validación en independiente: el WFE queda pendiente y hay que generar de nuevo
+con el modo estricto. El navegador no produce resultados SPP ni veredictos
+sintéticos; esas comprobaciones requieren la aplicación de escritorio.
 
 ## 5. Entender el Banco y los resultados
 
@@ -198,8 +210,9 @@ selecciona una fila para abrir su ficha.
   poca evidencia.
 - **Sharpe**: compara resultado y variación; el detalle distingue el Sharpe por
   operación del anualizado.
-- **Robustez**: puntuación resumida de varias pruebas. Úsala como orientación,
-  no como garantía ni como sustituto de revisar cada prueba.
+- **Robustez**: estado de las comprobaciones; solo «PASS» en todas califica
+  bajo el filtro estricto. La puntuación ordena candidatas, no es una
+  probabilidad ni una garantía de resultados futuros.
 
 La ficha de una estrategia también muestra una curva de capital (**equity**).
 La zona **fuera de muestra** (OOS) representa datos que el motor reserva para
@@ -212,8 +225,10 @@ operaciones, no solo el beneficio final.
 
 ## 6. Probar si una estrategia es resistente
 
-Estas pruebas responden preguntas diferentes. Un resultado **PASSED** en una
-prueba concreta no demuestra que la estrategia vaya a funcionar en el futuro.
+Estas pruebas responden preguntas diferentes. El Constructor exige las cinco
+condiciones estrictas descritas arriba cuando el filtro está activado. Aun así,
+un resultado **PASS** solo describe esos datos y esas perturbaciones; no prueba
+que la estrategia vaya a funcionar en el futuro.
 
 ### Retesteo
 
@@ -240,15 +255,31 @@ Elige una estrategia, deja seleccionadas las pruebas que quieres realizar y
 pulsa **Correr simulaciones**. Las simulaciones alteran el orden o la composición
 de las operaciones para ver cuánto depende el resultado de una secuencia
 concreta. Un porcentaje de aprobado es una medida de esas simulaciones, no la
-probabilidad de ganar dinero mañana.
+probabilidad de ganar dinero mañana. Mientras se calcula, la aplicación indica
+que sigue disponible. Si una simulación falla, verás el motivo y podrás volver
+a intentarlo cuando el botón se habilite de nuevo.
+
+Esta función requiere la aplicación de escritorio: el navegador no ejecuta el
+motor financiero ni muestra resultados inventados. La lista contiene solo
+pruebas implementadas. «Reordenar trades» y «Simulación de drawdown» informan
+drawdown porcentual; las demás informan beneficio neto en dinero. En esas
+pruebas, «% pasó» es el porcentaje de iteraciones con beneficio neto positivo;
+en drawdown, es el porcentaje que no excedió 1,3 veces el drawdown base más
+5 puntos porcentuales. «PASS» requiere que al menos el 75 % de las iteraciones
+de beneficio sean positivas; en drawdown, el percentil 95 debe ser menor o
+igual a ese umbral. Cada prueba ejecuta 100 iteraciones, por lo que un 100 %
+describe esa muestra y no garantiza resultados futuros.
 
 ### Robustez (SPP/Perf) y Perfil de optimización
 
-- **SPP** cambia piezas o parámetros de la regla para observar si el resultado
-  se mantiene o se desploma.
-- **Perfil de optimización** dibuja el resultado al cambiar un parámetro. Una
-  zona relativamente amplia y estable suele ser más tranquilizadora que un pico
-  aislado.
+- **SPP** ejecuta cinco pruebas de estrés de señales y parámetros; cada una
+  mide el cambio absoluto del beneficio neto. «PASS» exige un impacto menor del
+  10 % en todas; una alerta tampoco califica para el filtro estricto. Las
+  entradas aleatorias se repiten con 20 semillas y se usa el peor impacto.
+- **Perfil de optimización** barre cada parámetro activo; para calificar, cada
+  eje debe mantener al menos la mitad del rango dentro del 80 % del mejor
+  beneficio. Es una comprobación unidimensional, no una prueba conjunta de
+  todas las combinaciones.
 
 ### Optimizador
 

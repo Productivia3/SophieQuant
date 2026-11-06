@@ -488,6 +488,8 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
                        "perfil": s.robust.perfil,
                        "score": s.robust.score,
                        "avanzado": s.robust.avanzado,
+                       "calificado": s.robust.calificado,
+                       "datasetId": data_file_id,
                    }).to_string()],
             )?;
             Ok(th.last_insert_rowid())
@@ -535,7 +537,12 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
             }
         }
         let final_status = if reporter.cancelled() { "cancelled" } else { "done" };
-        let _ = reporter.report("info", &format!("build finalizado — {passed_n} estrategias pasadas"),
+        let final_message = if config.por_robustez && passed_n == 0 {
+            "build finalizado — 0 estrategias guardadas; revisa el registro para ver si bloquearon los filtros base o la robustez estricta".to_string()
+        } else {
+            format!("build finalizado — {passed_n} estrategias pasadas")
+        };
+        let _ = reporter.report("info", &final_message,
             passed_n, total, 1.0);
         let _ = conn.execute("update builds set status = ?1, finished_at = ?2 where id = ?3",
             q![final_status, now_ts(), build_id]);
@@ -598,7 +605,7 @@ fn list_bank_rows(db: &Connection) -> Result<Vec<serde_json::Value>, String> {
     let mut st = db.prepare(
         "select s.id, s.name, sy.name, s.timeframe, s.status,
                 b.net_profit, b.profit_factor, b.win_rate, b.max_dd, b.n_trades, b.sharpe, b.equity, b.oos_frac,
-                s.robust_score
+                s.robust_score, s.robust_detail, b.data_file_id
          from strategies s
          join symbols sy on sy.id = s.symbol_id
          left join backtest_runs b on b.strategy_id = s.id and b.id = (
@@ -606,6 +613,16 @@ fn list_bank_rows(db: &Connection) -> Result<Vec<serde_json::Value>, String> {
          order by (b.net_profit is null), b.net_profit desc").map_err(|e| e.to_string())?;
     let rows = st.query_map([], |r| {
         let equity_raw: Option<String> = r.get(11).ok();
+        let robust_detail: Option<String> = r.get(14)?;
+        let run_dataset_id: Option<i64> = r.get(15)?;
+        let robust_qualified = robust_detail
+            .and_then(|detail| serde_json::from_str::<serde_json::Value>(&detail).ok())
+            .map(|detail| {
+                detail["calificado"].as_bool() == Some(true)
+                    && run_dataset_id.is_some()
+                    && detail["datasetId"].as_i64() == run_dataset_id
+            })
+            .unwrap_or(false);
         Ok(serde_json::json!({
             "id": r.get::<_, i64>(0)?,
             "name": r.get::<_, String>(1)?,
@@ -618,7 +635,7 @@ fn list_bank_rows(db: &Connection) -> Result<Vec<serde_json::Value>, String> {
             "maxDD": r.get::<_, Option<f64>>(8)?,
             "nTrades": r.get::<_, Option<i64>>(9)?,
             "sharpe": r.get::<_, Option<f64>>(10)?,
-            "robustScore": r.get::<_, Option<f64>>(13)?,
+            "robustScore": if robust_qualified { r.get::<_, Option<f64>>(13)? } else { None },
             "lastRun": {
                 "equity": equity_raw.and_then(|e| serde_json::from_str::<Vec<f64>>(&e).ok()),
                 "oosFrac": r.get::<_, Option<f64>>(12)?,
@@ -1100,7 +1117,7 @@ fn load_core(db: &Connection, strategy_id: i64) -> Result<ops::StrategyCore, Str
 
 // ── Veredictos consolidados (tarjeta de robustez) ──────────────────
 //
-// Cuatro pruebas por estrategia: walk-forward, Monte Carlo (9 tests), SPP y
+// Cuatro pruebas por estrategia: walk-forward, Monte Carlo (6 tests), SPP y
 // perfil de optimización. Se calculan con el motor real, se guardan en
 // `strategy_verdicts` y se recuperan sin recalcular.
 
@@ -1120,8 +1137,9 @@ pub fn get_strategy_verdicts(state: State<AppState>, strategy_ids: Vec<i64>) -> 
             let row: Option<(String, String, Option<f64>, i64)> = db
                 .query_row(
                     "select estado, detalle, valor, calculado_en from strategy_verdicts
-                     where strategy_id = ?1 and check_key = ?2 order by id desc limit 1",
-                    q![id, key],
+                     where strategy_id = ?1 and check_key = ?2 and method_version = ?3
+                     order by id desc limit 1",
+                    q![id, key, crate::engine::verdicts::ROBUSTNESS_VERSION],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )
                 .optional()
@@ -1135,7 +1153,7 @@ pub fn get_strategy_verdicts(state: State<AppState>, strategy_ids: Vec<i64>) -> 
                 }
                 None => {
                     checks.insert(key.to_string(), serde_json::json!({
-                        "estado": "pending", "detalle": "sin calcular", "valor": serde_json::Value::Null,
+                        "estado": "pending", "detalle": "método actualizado: vuelve a calcular para validar con los criterios estrictos", "valor": serde_json::Value::Null,
                     }));
                 }
             }
@@ -1165,8 +1183,29 @@ pub fn compute_strategy_verdicts(state: State<AppState>, strategy_ids: Vec<i64>)
             .query_row("select name from strategies where id = ?1", q![id], |r| r.get(0))
             .optional()
             .map_err(|e| e.to_string())?;
+        let robust_detail: Option<String> = db
+            .query_row("select robust_detail from strategies where id = ?1", q![id], |r| r.get(0))
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let run_dataset_id: Option<i64> = db
+            .query_row(
+                "select data_file_id from backtest_runs where strategy_id = ?1 order by id desc limit 1",
+                q![id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        let searched_on_is = robust_detail
+            .and_then(|detail| serde_json::from_str::<serde_json::Value>(&detail).ok())
+            .map(|detail| {
+                detail["calificado"].as_bool() == Some(true)
+                    && run_dataset_id.is_some()
+                    && detail["datasetId"].as_i64() == run_dataset_id
+            })
+            .unwrap_or(false);
         let checks = match ops::load_strategy(db, id) {
-            Ok(Some(core)) => crate::engine::verdicts::for_strategy(&core, &cfg),
+            Ok(Some(core)) => crate::engine::verdicts::for_strategy(&core, &cfg, searched_on_is),
             Ok(None) => return Err(format!("estrategia {id} no encontrada")),
             Err(e) => {
                 let p = serde_json::json!({
@@ -1184,8 +1223,8 @@ pub fn compute_strategy_verdicts(state: State<AppState>, strategy_ids: Vec<i64>)
         for key in ["walkForward", "monteCarlo", "spp", "perfil"] {
             let c = &checks[key];
             db.execute(
-                "insert into strategy_verdicts (strategy_id, check_key, estado, detalle, valor, calculado_en)
-                 values (?1, ?2, ?3, ?4, ?5, ?6)",
+                "insert into strategy_verdicts (strategy_id, check_key, estado, detalle, valor, calculado_en, method_version)
+                 values (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 q![
                     id,
                     key,
@@ -1193,6 +1232,7 @@ pub fn compute_strategy_verdicts(state: State<AppState>, strategy_ids: Vec<i64>)
                     c["detalle"].as_str().unwrap_or(""),
                     c["valor"].as_f64(),
                     now,
+                    crate::engine::verdicts::ROBUSTNESS_VERSION,
                 ],
             )
             .map_err(|e| e.to_string())?;
@@ -1646,11 +1686,22 @@ pub fn run_spp(state: State<AppState>, strategy_id: i64) -> Result<serde_json::V
     Ok(v)
 }
 
-#[tauri::command(async)]
-pub fn run_mc_suite(state: State<AppState>, strategy_id: i64, tests: Vec<String>) -> Result<serde_json::Value, String> {
-    let db = state.db.lock();
-    let core = load_core(&db, strategy_id)?;
-    let mut v = ops::mc_suite(&core, &EngineCfg::default(), &tests, 100)?;
+#[tauri::command]
+pub async fn run_mc_suite(
+    state: State<'_, AppState>,
+    strategy_id: i64,
+    tests: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let core = {
+        let db = state.db.lock();
+        load_core(&db, strategy_id)?
+    };
+    let tests_for_history = tests.clone();
+    let mut v = tauri::async_runtime::spawn_blocking(move || {
+        ops::mc_suite(&core, &EngineCfg::default(), &tests, 100)
+    })
+    .await
+    .map_err(|e| format!("Falló la tarea de Monte Carlo: {e}"))??;
     v["strategyId"] = strategy_id.into();
     // historial: cuantas pruebas se superaron y la tasa media
     let res = v["results"].as_array().cloned().unwrap_or_default();
@@ -1668,6 +1719,7 @@ pub fn run_mc_suite(state: State<AppState>, strategy_id: i64, tests: Vec<String>
     } else {
         "fail"
     };
+    let db = state.db.lock();
     record_run(
         &db, strategy_id, "monte_carlo", verdict,
         &format!("{pasadas}/{total} pruebas superadas"),
@@ -1676,7 +1728,7 @@ pub fn run_mc_suite(state: State<AppState>, strategy_id: i64, tests: Vec<String>
             "superadas": pasadas,
             "tasaMedia": (media * 100.0).round() / 100.0,
         }),
-        serde_json::json!({ "tests": tests }),
+        serde_json::json!({ "tests": tests_for_history }),
         &v,
     );
     drop(db);
@@ -2124,8 +2176,8 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "insert into strategies (name, symbol_id, timeframe, origin, logic)
-             values ('QA strategy', 1, 'm1', 'builder', '{}')",
+            "insert into strategies (name, symbol_id, timeframe, origin, logic, robust_score, robust_detail)
+             values ('QA strategy', 1, 'm1', 'builder', '{}', 95, '{\"score\":95}')",
             [],
         )
         .unwrap();
@@ -2135,6 +2187,24 @@ mod tests {
         assert_eq!(bank.len(), 1);
         assert_eq!(bank[0]["name"], "QA strategy");
         assert_eq!(bank[0]["lastRun"]["oosFrac"], serde_json::Value::Null);
+        assert!(bank[0]["robustScore"].is_null(), "el score antiguo no debe presentarse como calificado");
+
+        conn.execute(
+            "insert into data_files (id, symbol_id, timeframe, storage_kind, file_path, status)
+             values (1, 1, 'm1', 'imported_csv', 'unused.qfn', 'ready')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "insert into backtest_runs (strategy_id, data_file_id, engine_cfg)
+             values (1, 1, '{}')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "update strategies set robust_detail = '{\"calificado\":true,\"datasetId\":1}' where id = 1",
+            [],
+        ).unwrap();
+        let bank = list_bank_rows(&conn).unwrap();
+        assert_eq!(bank[0]["robustScore"], 95.0);
     }
 
     #[test]

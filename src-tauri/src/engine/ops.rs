@@ -395,6 +395,12 @@ pub fn wfe_of(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -
     (100.0 * oos.metrics.profit_factor / is.metrics.profit_factor).min(150.0)
 }
 
+pub fn wfe_oos_trade_count(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -> u32 {
+    let cut = (bars.len() * 6 / 10).max(60);
+    if bars.len().saturating_sub(cut) < 60 { return 0 }
+    backtest::run(&bars[cut..], tmpl, params, cfg).metrics.n_trades
+}
+
 /// Grid p1 × p2 con PF/maxDD (optimizer) o WFE + veredicto (WF matrix).
 pub fn run_grid(
     core: &StrategyCore,
@@ -443,15 +449,41 @@ pub fn opt_profile(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String
     if !core.has_bars() {
         return Err(format!("Estrategia {} sin dataset QFN cargable — importa el CSV primero", core.id));
     }
+    opt_profile_axis(core, cfg, 0)
+}
+
+pub fn opt_profile_all(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String> {
+    if !core.has_bars() {
+        return Err(format!("Estrategia {} sin dataset QFN cargable — importa el CSV primero", core.id));
+    }
+    let names = core.template.param_names();
+    let profiles: Result<Vec<Value>, String> = (0..3)
+        .filter(|i| names[*i] != "—" && core.params[*i] > 0.0)
+        .map(|i| opt_profile_axis(core, cfg, i))
+        .collect();
+    let profiles = profiles?;
+    if profiles.is_empty() {
+        return Err("La estrategia no tiene parámetros activos que perfilar.".into());
+    }
+    Ok(json!({ "profiles": profiles }))
+}
+
+fn opt_profile_axis(core: &StrategyCore, cfg: &EngineCfg, param_index: usize) -> Result<Value, String> {
+    let param_name = core.template.param_names()[param_index];
+    if param_name == "—" || core.params[param_index] <= 0.0 {
+        return Err(format!("El parámetro {} no está activo.", param_index + 1));
+    }
     let n = 12;
-    let base = core.params[0].max(4.0);
+    let base = core.params[param_index].abs().max(1.0);
     let vals: Vec<f64> = (0..n)
         .map(|i| round1(base * (0.3 + 2.2 * i as f64 / (n - 1) as f64)).max(2.0))
         .collect();
     let mut points: Vec<Value> = Vec::new();
     let mut nets: Vec<f64> = Vec::with_capacity(n);
     for v in &vals {
-        let out = backtest::run(&core.bars, core.template, [round1(*v), core.params[1], core.params[2]], cfg);
+        let mut params = core.params;
+        params[param_index] = round1(*v);
+        let out = backtest::run(&core.bars, core.template, params, cfg);
         let net = round2(out.metrics.net_profit);
         nets.push(net);
         points.push(json!({ "param": v, "netProfit": net }));
@@ -476,7 +508,8 @@ pub fn opt_profile(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String
         else if width >= span * 0.2 { "unimodal" }
         else { "puntual" };
     Ok(json!({
-        "param": format!("p1 · {}", core.template.param_names()[0]),
+        "paramIndex": param_index,
+        "param": format!("p{} · {}", param_index + 1, param_name),
         "points": points,
         "stableFrom": stable_from, "stableTo": stable_to,
         "shape": shape, "bestParam": vals[ib],
@@ -515,7 +548,8 @@ pub fn save_logic(
     let oos_frac = oos_frac_of(&bars, &out.trades);
 
     db.execute(
-        "update strategies set template_id = ?1, params = ?2, logic = ?3, status = 'active'
+        "update strategies set template_id = ?1, params = ?2, logic = ?3, status = 'active',
+             robust_score = null, robust_detail = null
          where id = ?4",
         rusqlite::params![
             template_id_of(template),
@@ -866,9 +900,18 @@ pub fn metrics_json(m: &Metrics) -> Value {
 
 // ── Monte Carlo (suite de tests sobre trades recomputados) ──────────
 
+pub const MC_TESTS: [&str; 6] = [
+    "shuffle",
+    "skip",
+    "randomize_params",
+    "drawdown",
+    "duplicate",
+    "skip_certain",
+];
+
 /// Genera una variación de la lista de trades según el tipo de test.
 /// Cada test usa su propia semilla → determinista.
-pub fn mc_perturb(base: &[Trade], test: &str, seed: u64) -> Vec<Trade> {
+pub fn mc_perturb(base: &[Trade], test: &str, seed: u64) -> Result<Vec<Trade>, String> {
     let mut rng = Rng::new(seed);
     let mut out: Vec<Trade> = base.to_vec();
     match test {
@@ -879,34 +922,48 @@ pub fn mc_perturb(base: &[Trade], test: &str, seed: u64) -> Vec<Trade> {
                 out.swap(i, j);
             }
         }
-        "skip" | "skip_certain" => {
+        "skip" => {
             out.retain(|_| rng.next() > 0.10);
+        }
+        "skip_certain" => {
+            if !out.is_empty() {
+                let count = (out.len() / 10).max(1).min(out.len());
+                let start = rng.range_i(out.len() - count + 1);
+                out.drain(start..start + count);
+            }
         }
         "duplicate" => {
             let picked: Vec<Trade> = out.iter().filter(|_| rng.next() > 0.88).cloned().collect();
             out.extend(picked);
         }
-        "slippage" => {
-            // +1 pip de coste extra por trade (≈ $5 con 0.1 lots en EURUSD)
-            for t in &mut out {
-                t.profit -= 5.0;
+        "drawdown" => {
+            if base.is_empty() {
+                return Err("No hay operaciones para simular el drawdown.".into());
             }
+            out = (0..base.len())
+                .map(|_| base[rng.range_i(base.len())].clone())
+                .collect();
         }
         _ => {
-            // mapeo V1 de los tests de reconstrucción: jitter de P&L ±8%
-            for t in &mut out {
-                let j = 1.0 + (rng.next() - 0.5) * 0.16;
-                t.profit *= j;
-            }
+            return Err(format!("La prueba Monte Carlo «{test}» no está implementada."));
         }
     }
-    out
+    Ok(out)
 }
 
-/// Suite Monte Carlo: para cada test elegido, n trials + percentiles del net
-/// y passRate. V1 ejecuta las perturbaciones sobre los trades del motor
-/// (recomputados del dataset real); "drawdown" reporta percentiles de maxDD.
+/// Suite Monte Carlo sobre trades recalculados con el dataset de la estrategia.
 pub fn mc_suite(core: &StrategyCore, cfg: &EngineCfg, tests: &[String], trials: usize) -> Result<Value, String> {
+    if trials == 0 {
+        return Err("La simulación Monte Carlo requiere al menos una iteración.".into());
+    }
+    if tests.is_empty() {
+        return Err("Selecciona al menos una prueba Monte Carlo.".into());
+    }
+    for test in tests {
+        if !MC_TESTS.contains(&test.as_str()) {
+            return Err(format!("La prueba Monte Carlo «{test}» no está implementada."));
+        }
+    }
     if !core.has_bars() {
         return Err(format!("Estrategia {} sin dataset cargable", core.name));
     }
@@ -917,30 +974,30 @@ pub fn mc_suite(core: &StrategyCore, cfg: &EngineCfg, tests: &[String], trials: 
     let mut results: Vec<Value> = Vec::new();
     for t in tests {
         let mut nets: Vec<f64> = Vec::with_capacity(trials);
-        // randomize_params es la única que re-ejecuta señales (jitter ±10% en p1/p2)
+        // randomize_params vuelve a ejecutar señales con todos los parámetros activos perturbados.
         if t == "randomize_params" {
             for k in 0..trials {
                 let mut rr = Rng::new(9000 + k as u64);
-                let p = [
-                    round2(core.params[0] * (1.0 + (rr.next() - 0.5) * 0.2)).max(2.0),
-                    round2(core.params[1] * (1.0 + (rr.next() - 0.5) * 0.2)).max(2.0),
-                    core.params[2],
-                ];
+                let mut p = core.params;
+                for (i, name) in core.template.param_names().iter().enumerate() {
+                    if *name != "—" {
+                        p[i] = round2(p[i] * (1.0 + (rr.next() - 0.5) * 0.2)).max(1.0);
+                    }
+                }
                 let o = backtest::run(&core.bars, core.template, p, cfg);
                 nets.push(o.metrics.net_profit);
             }
             results.push(mc_value(t, nets));
-        } else if t == "drawdown" {
-            // distribución de maxDD al reordenar: pass = p95 del DD no empeora >30%
+        } else if t == "shuffle" || t == "drawdown" {
             for k in 0..trials {
-                let pert = mc_perturb(&base_out.trades, t, 1000 + k as u64);
-                let eq = super::metrics::equity_series(&pert, cfg.initial_balance, 500);
+                let pert = mc_perturb(&base_out.trades, t, 1000 + k as u64)?;
+                let eq = super::metrics::equity_series(&pert, cfg.initial_balance, usize::MAX);
                 nets.push(max_dd_pct(&eq));
             }
             results.push(mc_dd_value(t, nets, base_out.metrics.max_dd));
         } else {
             for k in 0..trials {
-                let pert = mc_perturb(&base_out.trades, t, 1000 + k as u64);
+                let pert = mc_perturb(&base_out.trades, t, 1000 + k as u64)?;
                 let eq = super::metrics::equity_series(&pert, cfg.initial_balance, 500);
                 let m = super::metrics::compute(&pert, &eq, cfg.initial_balance);
                 nets.push(m.net_profit);
@@ -958,6 +1015,7 @@ fn mc_value(test: &str, nets: Vec<f64>) -> Value {
     json!({
         "test": test, "passed": pass_rate >= 0.75,
         "passRate": round2(pass_rate * 100.0) / 100.0,
+        "metric": "netProfit", "trials": nets.len(),
         "percentiles": { "p5": round2(pct(&s, 0.05)), "p50": round2(pct(&s, 0.5)), "p95": round2(pct(&s, 0.95)) },
     })
 }
@@ -970,6 +1028,7 @@ fn mc_dd_value(test: &str, dds: Vec<f64>, base_dd: f64) -> Value {
     let pass_rate = dds.iter().filter(|d| **d <= base_dd * 1.3 + 5.0).count() as f64 / dds.len().max(1) as f64;
     json!({
         "test": test, "passed": ok, "passRate": round2(pass_rate * 100.0) / 100.0,
+        "metric": "maxDrawdown", "trials": dds.len(),
         "percentiles": { "p5": round2(pct(&s, 0.05)), "p50": round2(pct(&s, 0.5)), "p95": round2(p95) },
     })
 }
@@ -987,6 +1046,9 @@ pub fn spp(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String> {
     let atr_vals = super::indicators::atr(&core.bars, 14);
     let base_out = backtest::run_signals(&core.bars, &base_sig, &atr_vals, cfg);
     let net0 = base_out.metrics.net_profit;
+    if base_out.metrics.n_trades < 20 || net0 <= 0.0 {
+        return Err("SPP requiere al menos 20 operaciones y beneficio neto positivo.".into());
+    }
 
     // variantes de señales; None = se calcula por otra vía (post-proceso o re-eval)
     let variants: Vec<(&str, &str, Option<Vec<Signal>>)> = vec![
@@ -999,42 +1061,44 @@ pub fn spp(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String> {
             Signal::EnterLong => Signal::ExitLong, // también sale en la próxima señal de entrada
             s => *s,
         }).collect())),
-        ("trade_split", "Operaciones divididas", None),
         ("opposite", "Señal opuesta", Some(base_sig.iter().map(|s| match s {
             Signal::EnterLong => Signal::ExitLong,
             Signal::ExitLong => Signal::EnterLong,
             Signal::None => Signal::None,
         }).collect())),
-        ("param_permute", "Permutación de parámetros", None),
+        ("param_permute", "Parámetros perturbados", None),
         ("random_entry", "Entradas aleatorias", None),
     ];
 
     let mut results = Vec::with_capacity(variants.len());
     for (key, label, sigs) in &variants {
         let net = match (*key, sigs) {
-            ("trade_split", _) => {
-                // dividir cada trade en dos mitades (mismo valor repartido)
-                let mut two: Vec<Trade> = Vec::with_capacity(base_out.trades.len() * 2);
-                for t in &base_out.trades {
-                    for _ in 0..2 {
-                        two.push(Trade { direction: t.direction, open_time: t.open_time, open_price: t.open_price, close_time: t.close_time, close_price: t.close_price, profit: t.profit / 2.0, bars: t.bars , mae: t.mae, mfe: t.mfe });
+            ("param_permute", _) => {
+                let mut rr = Rng::new(82731);
+                let mut p = core.params;
+                for (i, name) in core.template.param_names().iter().enumerate() {
+                    if *name != "—" {
+                        p[i] = round2(p[i] * (1.0 + (rr.next() - 0.5) * 0.2)).max(1.0);
                     }
                 }
-                let eq = super::metrics::equity_series(&two, cfg.initial_balance, 500);
-                super::metrics::compute(&two, &eq, cfg.initial_balance).net_profit
-            }
-            ("param_permute", _) => {
-                let p = [core.params[1], core.params[0], core.params[2]];
                 let sigs2 = evaluate(core.template, p, &core.bars, cfg);
                 backtest::run_signals(&core.bars, &sigs2, &atr_vals, cfg).metrics.net_profit
             }
             ("random_entry", _) => {
-                let mut rr = Rng::new(31337);
-                let sigs3: Vec<Signal> = base_sig.iter().map(|s| match s {
-                    Signal::None if rr.next() < 0.04 => Signal::EnterLong,
-                    s => *s,
-                }).collect();
-                backtest::run_signals(&core.bars, &sigs3, &atr_vals, cfg).metrics.net_profit
+                let mut worst_impact: f64 = 0.0;
+                for seed in 0..20 {
+                    let mut rr = Rng::new(31337 + seed);
+                    let sigs3: Vec<Signal> = base_sig.iter().map(|s| match s {
+                        Signal::None if rr.next() < 0.04 => Signal::EnterLong,
+                        s => *s,
+                    }).collect();
+                    let perturbed = backtest::run_signals(&core.bars, &sigs3, &atr_vals, cfg).metrics.net_profit;
+                    worst_impact = worst_impact.max(
+                        100.0 * (perturbed - net0).abs() / net0.abs().max(1.0),
+                    );
+                }
+                results.push(spp_result(key, label, worst_impact));
+                continue;
             }
             (_, Some(sigs_custom)) => {
                 backtest::run_signals(&core.bars, sigs_custom, &atr_vals, cfg).metrics.net_profit
@@ -1042,11 +1106,26 @@ pub fn spp(core: &StrategyCore, cfg: &EngineCfg) -> Result<Value, String> {
             (_, None) => net0,
         };
         let impact = (100.0 * (net - net0).abs() / net0.abs().max(1.0)).min(999.0);
-        let verdict = if impact < 10.0 { "pass" } else if impact < 25.0 { "warn" } else { "fail" };
-        results.push(json!({ "key": key, "label": label, "impactPct": round1(impact), "verdict": verdict }));
+        results.push(spp_result(key, label, impact));
     }
-    let overall = if results.iter().all(|r| r["verdict"] != "fail") { "pass" } else { "fail" };
+    let overall = spp_overall(&results);
     Ok(json!({ "results": results, "overall": overall }))
+}
+
+fn spp_overall(results: &[Value]) -> &'static str {
+    if results.is_empty() || results.iter().any(|result| result["verdict"] == "fail") {
+        "fail"
+    } else if results.iter().all(|result| result["verdict"] == "pass") {
+        "pass"
+    } else {
+        "warn"
+    }
+}
+
+fn spp_result(key: &str, label: &str, impact: f64) -> Value {
+    let impact = impact.min(999.0);
+    let verdict = if impact < 10.0 { "pass" } else if impact < 25.0 { "warn" } else { "fail" };
+    json!({ "key": key, "label": label, "impactPct": round1(impact), "verdict": verdict })
 }
 
 
@@ -1162,6 +1241,93 @@ fn round3(v: f64) -> f64 { (v * 1000.0).round() / 1000.0 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn monte_carlo_shuffle_mide_drawdown_y_expone_el_numero_de_iteraciones() {
+        let core = StrategyCore {
+            id: 1,
+            name: "MC test".into(),
+            template: Template::MaCross,
+            params: [20.0, 50.0, 0.0],
+            bars: serie_con_ciclos(1200),
+        };
+        let result = mc_suite(&core, &EngineCfg::default(), &["shuffle".into()], 100).unwrap();
+        let shuffle = &result["results"][0];
+
+        assert_eq!(shuffle["metric"], "maxDrawdown");
+        assert_eq!(shuffle["trials"], 100);
+    }
+
+    #[test]
+    fn monte_carlo_shuffle_detecta_el_riesgo_de_agrupar_perdidas() {
+        let trades: Vec<Trade> = [500.0, -400.0, 500.0, -400.0, 500.0, -400.0, 500.0, -400.0]
+            .into_iter()
+            .map(|profit| Trade {
+                direction: super::super::types::Direction::Long,
+                open_time: 0,
+                open_price: 1.0,
+                close_time: 1,
+                close_price: 1.0,
+                profit,
+                bars: 1,
+                mae: 0.0,
+                mfe: 0.0,
+            })
+            .collect();
+        let cfg = EngineCfg::default();
+        let base_equity = crate::engine::metrics::equity_series(&trades, cfg.initial_balance, usize::MAX);
+        let base_dd = max_dd_pct(&base_equity);
+        let dds: Vec<f64> = (0..100)
+            .map(|seed| {
+                let shuffled = mc_perturb(&trades, "shuffle", seed).unwrap();
+                let equity = crate::engine::metrics::equity_series(&shuffled, cfg.initial_balance, usize::MAX);
+                max_dd_pct(&equity)
+            })
+            .collect();
+        let result = mc_dd_value("shuffle", dds, base_dd);
+
+        assert_eq!(result["metric"], "maxDrawdown");
+        assert!(result["percentiles"]["p95"].as_f64().unwrap() > base_dd);
+        assert!(result["passRate"].as_f64().unwrap() < 1.0);
+    }
+
+    #[test]
+    fn monte_carlo_rechaza_pruebas_sin_simulacion_real() {
+        let core = StrategyCore {
+            id: 1,
+            name: "MC test".into(),
+            template: Template::MaCross,
+            params: [20.0, 50.0, 0.0],
+            bars: serie_con_ciclos(1200),
+        };
+        let result = mc_suite(&core, &EngineCfg::default(), &["use_variants".into()], 100);
+
+        assert!(result.unwrap_err().contains("no está implementada"));
+    }
+
+    #[test]
+    fn spp_no_califica_avisos_ni_resultados_vacios_como_pass() {
+        assert_eq!(spp_overall(&[]), "fail");
+        assert_eq!(spp_overall(&[json!({"verdict": "warn"})]), "warn");
+        assert_eq!(spp_overall(&[json!({"verdict": "pass"}), json!({"verdict": "warn"})]), "warn");
+        assert_eq!(spp_overall(&[json!({"verdict": "pass"}), json!({"verdict": "fail"})]), "fail");
+        assert_eq!(spp_overall(&[json!({"verdict": "pass"})]), "pass");
+    }
+
+    #[test]
+    fn perfil_estricto_revisa_todos_los_parametros_activos() {
+        let core = StrategyCore {
+            id: 1,
+            name: "perfil".into(),
+            template: Template::RsiReversion,
+            params: [14.0, 30.0, 70.0],
+            bars: serie_con_ciclos(1200),
+        };
+        let result = opt_profile_all(&core, &EngineCfg::default()).unwrap();
+        let profiles = result["profiles"].as_array().unwrap();
+        assert_eq!(profiles.len(), 3);
+        assert_eq!(profiles.iter().map(|p| p["paramIndex"].as_u64().unwrap()).collect::<Vec<_>>(), vec![0, 1, 2]);
+    }
 
 
 

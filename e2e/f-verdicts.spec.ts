@@ -16,28 +16,22 @@ test.afterEach(async ({ page }) => {
 })
 
 test.describe('Veredictos de robustez', () => {
-  test('V-H1 la tarjeta del detalle muestra los cuatro checks', async ({ page }) => {
+  test('V-H1 el navegador no presenta ni calcula veredictos simulados', async ({ page }) => {
     await page.goto('/#/strategy/3')
     await expect(page.getByRole('heading', { name: /veredictos de robustez/i })).toBeVisible()
-    await page.getByRole('button', { name: /calcular veredictos/i }).click()
-    await expect(page.getByText(/walk-forward/i).first()).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/monte carlo/i).first()).toBeVisible()
-    await expect(page.getByText(/permutaciones \(spp\)/i).first()).toBeVisible()
-    await expect(page.getByText(/perfil de optimizaci/i).first()).toBeVisible()
-    // los umbrales se muestran: el veredicto nunca es una caja negra
-    await expect(page.getByText(/umbral 50 %/i).first()).toBeVisible()
+    await expect(page.getByRole('status')).toContainText(/requiere la aplicación de escritorio/i)
+    await expect(page.getByRole('button', { name: /calcular veredictos/i })).toHaveCount(0)
+    await expect(page.getByText(/sin dependencias frágiles detectadas/i)).toHaveCount(0)
 
     const a11y = await new AxeConstructor({ page }).analyze()
     expect(a11y.violations).toEqual([])
   })
 
-  test('V-H2 el banco muestra la columna de robustez y calcula veredictos', async ({ page }) => {
+  test('V-H2 el banco no permite calcular robustez simulada en el navegador', async ({ page }) => {
     await page.goto('/#/bank')
     await expect(page.getByRole('columnheader', { name: /robustez/i })).toBeVisible()
-    await page.getByRole('button', { name: /calcular veredictos/i }).click()
-    await expect(page.getByText(/veredictos calculados para/i)).toBeVisible({ timeout: 20_000 })
-    // cada fila muestra un estado (PASSED / FAILED / AVISO / PENDING)
-    await expect(page.getByText(/passed|failed|aviso|pending/i).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: /calcular veredictos/i })).toBeDisabled()
+    await expect(page.getByRole('status')).toContainText(/no calcula ni inventa resultados de robustez/i)
   })
 
   test('V-H3 el Laboratorio tiene la pestaña de veredictos', async ({ page }) => {

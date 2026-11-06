@@ -29,7 +29,7 @@ pub struct BuildConfig {
     pub filters: Vec<MetricFilter>,
     /// Numero minimo de operaciones para considerar valida una estrategia.
     pub min_trades: u32,
-    /// Ordenar por score de robustez en vez de por beneficio.
+    /// Exigir validaciones estrictas y ordenar por score de robustez.
     pub por_robustez: bool,
     pub monte_carlo: bool,
     pub n_iterations: u32,  // presupuesto de backtests
@@ -71,6 +71,22 @@ pub fn build(
     let mut passed: Vec<GenStrat> = Vec::new();
     let n_target = bcfg.n_target.min(2000);
     let mut iterations_left: i64 = bcfg.n_iterations.max(200) as i64;
+    let search_bars = if bcfg.por_robustez {
+        let cut = (bars.len() * 6 / 10).max(60);
+        if cut < 300 {
+            reporter.report(
+                "err",
+                "robustez estricta requiere al menos 300 barras de entrenamiento; importa un dataset más largo",
+                0,
+                n_target,
+                1.0,
+            );
+            return passed;
+        }
+        &bars[..cut]
+    } else {
+        bars
+    };
 
     // población inicial: variantes de la plantilla elegida con params aleatorios
     let templates = [Template::MaCross, Template::RsiReversion, Template::AtrBreakout];
@@ -101,7 +117,7 @@ pub fn build(
         let batch: Vec<GenStrat> = current_gen
             .par_iter()
             .filter_map(|(t, p)| {
-                let r = backtest::run(bars, *t, *p, cfg);
+                let r = backtest::run(search_bars, *t, *p, cfg);
                 if robust::passes(&r.metrics, &bcfg.filters, bcfg.min_trades) {
                     Some(GenStrat {
                         tmpl: *t,
@@ -182,22 +198,34 @@ pub fn build(
     }
 
     // ── seleccion ──────────────────────────────────────────────────────
-    // Por defecto gana la estrategia mas robusta (no la que mas beneficio da):
-    // se calcula el score rapido (walk-forward + Monte Carlo) de las que pasan
-    // los filtros y se ordenan por ese score. Las finalistas reciben ademas el
-    // score avanzado (SPP + perfil) y vuelven a ordenarse.
+    // Con el modo estricto solo se conservan candidatos que pasan todas las
+    // validaciones; el score ordena los que ya han quedado calificados.
     if bcfg.por_robustez && !passed.is_empty() {
-        // Todas las supervivientes reciben el MISMO score avanzado (walk-forward +
-        // Monte Carlo + SPP + perfil). Importa que sea el mismo para todas: si
-        // unas tuvieran el score rapido y otras el avanzado, la ordenacion
-        // compararia dos escalas distintas y no significaria nada.
+        let evaluated = passed.len();
         passed = passed
             .into_par_iter()
             .map(|mut s| {
                 s.robust = robust::full(bars, s.tmpl, s.params, cfg);
+                s.robust.calificado &= bcfg.monte_carlo;
+                if s.robust.calificado {
+                    s.result = backtest::run(bars, s.tmpl, s.params, cfg);
+                }
                 s
             })
             .collect();
+        let qualified = passed.iter().filter(|s| s.robust.calificado).count();
+        passed.retain(|s| s.robust.calificado);
+        if qualified < evaluated {
+            reporter.report(
+                "warn",
+                &format!(
+                    "robustez estricta: {qualified}/{evaluated} candidatos evaluados superaron todas las pruebas; los demás se excluyeron"
+                ),
+                qualified as u32,
+                bcfg.n_target,
+                1.0,
+            );
+        }
         passed.sort_by(|a, b| {
             b.robust.score.partial_cmp(&a.robust.score).unwrap_or(std::cmp::Ordering::Equal)
         });
@@ -341,10 +369,10 @@ mod tests {
         bcfg.por_robustez = true;
 
         let out = build(&bars, &cfg, &bcfg, &SilentReporter);
-        assert!(!out.is_empty(), "debe generar estrategias");
-        // todas tienen los componentes del score calculados (puede valer 0 si la
-        // serie sintetica no da senal de robustez, pero no puede quedar sin calcular)
+        // El modo estricto puede devolver cero: nunca debe incluir una candidata
+        // que no haya superado cada criterio.
         for s in out.iter() {
+            assert!(s.robust.calificado, "candidato no calificado: {}", s.name);
             assert!(s.robust.wfe <= 150.0 && s.robust.mc_survival >= 0.0);
             assert!(s.robust.mc_survival <= 100.0);
         }
@@ -357,7 +385,7 @@ mod tests {
                 w[1].robust.score
             );
         }
-        // todas llevan el score avanzado (SPP + perfil), no unas rapidas y otras no
+        // todas llevan el score avanzado (SPP + perfil).
         for s in out.iter() {
             assert!(s.robust.avanzado, "falta el score avanzado en {}", s.name);
         }

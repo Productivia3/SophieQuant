@@ -17,9 +17,6 @@ const mcTests = [
   { key: 'shuffle', label: 'Reordenar trades' },
   { key: 'skip', label: 'Saltar trades al azar' },
   { key: 'randomize_params', label: 'Aleatorizar parámetros' },
-  { key: 'use_variants', label: 'Variantes de dirección' },
-  { key: 'ohlc_interpolation', label: 'Interpolación OHLC' },
-  { key: 'simulation_returns', label: 'Reconstruir retornos' },
   { key: 'drawdown', label: 'Simulación de drawdown' },
   { key: 'duplicate', label: 'Duplicar operaciones' },
   { key: 'skip_certain', label: 'Omitir períodos' },
@@ -31,22 +28,32 @@ export function S13MonteCarlo() {
   const [tests, setTests] = useState<string[]>(['shuffle', 'skip', 'randomize_params'])
   const [busy, setBusy] = useState(false)
   const [suite, setSuite] = useState<McSuiteResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { api.listBank({}).then(rs => { setRows(rs); setSel(rs[0] ?? null) }) }, [])
 
   const toggle = (k: string) => setTests(prev => prev.includes(k) ? prev.filter(t => t !== k) : [...prev, k])
+  const desktopAvailable = api.isDesktop()
 
   async function run() {
-    if (!sel) return
-    setBusy(true); setSuite(null)
-    const res = await api.runMonteCarloSuite(sel.id, tests)
-    setSuite(res); setBusy(false)
+    if (!sel || busy) return
+    setBusy(true)
+    setSuite(null)
+    setError(null)
+    try {
+      const res = await api.runMonteCarloSuite(sel.id, tests)
+      setSuite(res)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <Page title="Monte Carlo" icon={<Repeat size={16} />}
       actions={
-        <Button variant="primary" loading={busy} disabled={!sel || tests.length === 0} onClick={run}>
+        <Button variant="primary" loading={busy} disabled={!desktopAvailable || !sel || tests.length === 0} onClick={run}>
           <Play size={14} aria-hidden /> Correr simulaciones
         </Button>
       }>
@@ -60,7 +67,7 @@ export function S13MonteCarlo() {
             </select>
           </div>
           <div className="rounded-md border border-border bg-surface p-3">
-            <h2 className="mb-2 text-sm font-semibold text-muted">Simulaciones ({tests.length}/9)</h2>
+            <h2 className="mb-2 text-sm font-semibold text-muted">Simulaciones ({tests.length}/{mcTests.length})</h2>
             <ul className="space-y-1.5">
               {mcTests.map(t => (
                 <li key={t.key}>
@@ -81,10 +88,25 @@ export function S13MonteCarlo() {
 
         <div>
           <h2 className="mb-2 text-base font-semibold">Resultados</h2>
+          {!desktopAvailable && (
+            <p className="mb-3 text-sm text-warning" role="status">
+              Monte Carlo requiere la aplicación de escritorio y el motor Rust. En el navegador no se generan resultados simulados.
+            </p>
+          )}
+          {busy && (
+            <p className="mb-3 text-sm text-muted" role="status" aria-live="polite">
+              Calculando 100 iteraciones por simulación seleccionada. La aplicación sigue disponible mientras termina.
+            </p>
+          )}
+          {error && (
+            <p className="mb-3 text-sm text-danger" role="alert">
+              No se pudieron ejecutar las simulaciones: {error}
+            </p>
+          )}
           {!suite ? (
             busy
               ? <TableSkeleton rows={5} height={44} />
-              : <EmptyState title="Sin corrida" hint="Elige simulaciones y corre. Los tests que no superen el 50% marcan FAIL y pueden filtrarse automáticamente en la generación." />
+              : <EmptyState title="Sin corrida" hint="Elige simulaciones y corre. PASS requiere al menos 75% de iteraciones rentables en pruebas de beneficio; en drawdown, el p95 debe quedar dentro del umbral indicado." />
           ) : (
             <table className="w-full min-w-[640px] text-sm">
               <thead>
@@ -92,9 +114,9 @@ export function S13MonteCarlo() {
                   <th className="px-3 py-2 font-medium">Simulación</th>
                   <th className="px-3 py-2 font-medium">Veredicto</th>
                   <th className="px-3 py-2 font-medium">% pasó</th>
-                  <th className="px-3 py-2 font-medium">PF p5</th>
-                  <th className="px-3 py-2 font-medium">PF p50</th>
-                  <th className="px-3 py-2 font-medium">PF p95</th>
+                  <th className="px-3 py-2 font-medium">Métrica p5</th>
+                  <th className="px-3 py-2 font-medium">Mediana</th>
+                  <th className="px-3 py-2 font-medium">Métrica p95</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -103,13 +125,24 @@ export function S13MonteCarlo() {
                     <td className="px-3 py-2">{mcTests.find(t => t.key === r.test)?.label ?? r.test}</td>
                     <td className="px-3 py-2"><Badge tone={r.passed ? 'pass' : 'fail'} /></td>
                     <td className="px-3 py-2 text-right font-mono">{(r.passRate * 100).toFixed(0)}%</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtNum(r.percentiles.p5)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtNum(r.percentiles.p50)}</td>
-                    <td className="px-3 py-2 text-right font-mono">{fmtNum(r.percentiles.p95)}</td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {r.metric === 'maxDrawdown' ? `${fmtNum(r.percentiles.p5)}%` : fmtMoney(r.percentiles.p5)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {r.metric === 'maxDrawdown' ? `${fmtNum(r.percentiles.p50)}%` : fmtMoney(r.percentiles.p50)}
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono">
+                      {r.metric === 'maxDrawdown' ? `${fmtNum(r.percentiles.p95)}%` : fmtMoney(r.percentiles.p95)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+          {suite && (
+            <p className="mt-3 text-xs text-muted">
+              Cada prueba usa {suite.results[0]?.trials ?? 0} iteraciones. PASS requiere al menos 75% de iteraciones con beneficio neto positivo; en drawdown, el p95 debe ser ≤ 1,3 × DD base + 5 puntos porcentuales. “% pasó” indica la fracción de iteraciones dentro de esos criterios. Un 100% describe esta muestra, no garantiza resultados futuros.
+            </p>
           )}
         </div>
       </div>

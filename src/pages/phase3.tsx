@@ -465,14 +465,23 @@ export function S14Robustness() {
   const [sel, setSel] = useState<StrategyRec | null>(null)
   const [busy, setBusy] = useState(false)
   const [res, setRes] = useState<SppResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const desktopAvailable = api.isDesktop()
 
   useEffect(() => { api.listBank({}).then(rs => { setRows(rs); setSel(rs[0] ?? null) }) }, [])
 
   async function run() {
-    if (!sel) return
-    setBusy(true); setRes(null)
-    setRes(await api.runSpp(sel.id))
-    setBusy(false)
+    if (!sel || busy) return
+    setBusy(true)
+    setRes(null)
+    setError(null)
+    try {
+      setRes(await api.runSpp(sel.id))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   const bar = (impact: number) => Math.min(100, impact * 2.2)
@@ -480,7 +489,7 @@ export function S14Robustness() {
   return (
     <Page title="SPP · pruebas de robustez" icon={<PieChart size={16} />}
       actions={
-        <Button variant="primary" loading={busy} disabled={!sel} onClick={run}>
+        <Button variant="primary" loading={busy} disabled={!desktopAvailable || !sel} onClick={run}>
           <Play size={14} aria-hidden /> Correr SPP
         </Button>
       }>
@@ -492,26 +501,34 @@ export function S14Robustness() {
             {rows.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
           <p className="mt-3 text-xs text-muted">
-            SPP = permutaciones de señal: revierte entradas/salidas, parte operaciones o
-            mueve parámetros. Si la estrategia depende del azar, el net lo paga.
+            SPP = pruebas de estrés de señales y parámetros. Cada perturbación compara el beneficio
+            con el original; se prueban 20 variantes de entradas aleatorias.
           </p>
+          {!desktopAvailable && (
+            <p className="mt-2 text-xs text-warning" role="status">
+              SPP requiere la aplicación de escritorio; el navegador no genera resultados simulados.
+            </p>
+          )}
           <Link to="/profile" className="mt-3 inline-block text-sm text-accent hover:underline">
             Ver Perfil de optimización →
           </Link>
         </div>
 
         <div className="min-w-0 space-y-3">
+          {error && <p className="text-sm text-danger" role="alert">No se pudo ejecutar SPP: {error}</p>}
           {!res ? (
             <EmptyState title="Sin SPP todavía"
               hint="Corre las pruebas para saber si la estrategia es robusta: con señales rotas casi no debería cambiar el resultado." />
           ) : (
             <>
               <div className="flex items-center gap-2">
-                <Badge tone={res.overall === 'pass' ? 'pass' : 'fail'} />
+                <Badge tone={verdictTone(res.overall)} label={verdictLabel(res.overall)} />
                 <span className="text-sm text-muted">
                   {res.overall === 'pass'
-                    ? 'Sin dependencias frágiles detectadas.'
-                    : 'Hay permutaciones que rompen la estrategia: señales frágiles.'}
+                    ? 'Todas las perturbaciones evaluadas quedaron bajo el umbral.'
+                    : res.overall === 'warn'
+                      ? 'Hay perturbaciones en zona de alerta; no se considera un PASS estricto.'
+                      : 'Hay perturbaciones que superan el umbral: señales frágiles.'}
                 </span>
               </div>
               <ul className="space-y-2">

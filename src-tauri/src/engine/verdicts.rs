@@ -23,24 +23,16 @@ pub fn oos_fraction() -> f64 {
     1.0 - IS_SPLIT
 }
 
-/// Las 9 pruebas estándar de Monte Carlo (las mismas que ofrece la UI).
-pub const MC_TESTS: [&str; 9] = [
-    "shuffle",
-    "skip",
-    "randomize_params",
-    "use_variants",
-    "ohlc_interpolation",
-    "simulation_returns",
-    "drawdown",
-    "duplicate",
-    "skip_certain",
-];
+/// Pruebas Monte Carlo con perturbaciones implementadas y resultados verificables.
+pub const MC_TESTS: [&str; 6] = ops::MC_TESTS;
 
 /// Umbrales (se muestran en la UI para que el usuario sepa qué significa).
 pub const WFE_PASS: f64 = 50.0; // % de eficiencia walk-forward
 pub const WFE_WARN: f64 = 30.0;
-pub const MC_PASS_RATIO: f64 = 0.999; // 9/9 pruebas superadas
-pub const MC_WARN_RATIO: f64 = 0.75; // 7/9 o más
+pub const MIN_OOS_TRADES: u32 = 30;
+pub const MC_PASS_RATIO: f64 = 0.999; // 6/6 pruebas superadas
+pub const MC_WARN_RATIO: f64 = 0.75; // al menos 5/6
+pub const ROBUSTNESS_VERSION: i64 = 2;
 
 fn check(estado: &str, detalle: String, valor: Option<f64>) -> Value {
     json!({
@@ -56,7 +48,7 @@ fn pending(detalle: impl Into<String>) -> Value {
 
 /// Calcula los cuatro veredictos de una estrategia.
 /// Devuelve un JSON con las claves `walkForward`, `monteCarlo`, `spp` y `perfil`.
-pub fn for_strategy(core: &StrategyCore, cfg: &EngineCfg) -> Value {
+pub fn for_strategy(core: &StrategyCore, cfg: &EngineCfg, searched_on_is: bool) -> Value {
     if !core.has_bars() {
         let p = pending("sin dataset cargado para esta estrategia");
         return json!({
@@ -65,16 +57,25 @@ pub fn for_strategy(core: &StrategyCore, cfg: &EngineCfg) -> Value {
     }
 
     // 1) Walk-forward: eficiencia out-of-sample frente a in-sample.
-    let wfe = ops::wfe_of(&core.bars, core.template, core.params, cfg);
-    let walk_forward = if wfe >= WFE_PASS {
-        check("pass", format!("WFE {wfe:.1} % · umbral {WFE_PASS:.0} %"), Some(wfe))
-    } else if wfe >= WFE_WARN {
-        check("warn", format!("WFE {wfe:.1} % · umbral {WFE_PASS:.0} %"), Some(wfe))
+    let walk_forward = if !searched_on_is {
+        pending("no consta que los parámetros se buscaran solo en el tramo IS; ejecuta el Constructor estricto")
     } else {
-        check("fail", format!("WFE {wfe:.1} % · umbral {WFE_PASS:.0} %"), Some(wfe))
+        let oos_trades = ops::wfe_oos_trade_count(&core.bars, core.template, core.params, cfg);
+        if oos_trades < MIN_OOS_TRADES {
+            pending(format!("muestra OOS insuficiente: {oos_trades}/{MIN_OOS_TRADES} operaciones"))
+        } else {
+            let wfe = ops::wfe_of(&core.bars, core.template, core.params, cfg);
+            if wfe >= WFE_PASS {
+                check("pass", format!("WFE {wfe:.1} % · umbral {WFE_PASS:.0} % · {oos_trades} trades OOS"), Some(wfe))
+            } else if wfe >= WFE_WARN {
+                check("warn", format!("WFE {wfe:.1} % · umbral {WFE_PASS:.0} % · {oos_trades} trades OOS"), Some(wfe))
+            } else {
+                check("fail", format!("WFE {wfe:.1} % · umbral {WFE_PASS:.0} % · {oos_trades} trades OOS"), Some(wfe))
+            }
+        }
     };
 
-    // 2) Monte Carlo: las 9 pruebas estándar.
+    // 2) Monte Carlo: las seis pruebas implementadas.
     let tests: Vec<String> = MC_TESTS.iter().map(|s| s.to_string()).collect();
     let monte_carlo = match ops::mc_suite(core, cfg, &tests, 60) {
         Ok(v) => {
@@ -106,6 +107,7 @@ pub fn for_strategy(core: &StrategyCore, cfg: &EngineCfg) -> Value {
             let detalle = format!("impacto máximo {worst:.1} %");
             match overall {
                 "pass" => check("pass", detalle, Some(worst)),
+                "warn" => check("warn", detalle, Some(worst)),
                 _ => check("fail", detalle, Some(worst)),
             }
         }
@@ -113,20 +115,24 @@ pub fn for_strategy(core: &StrategyCore, cfg: &EngineCfg) -> Value {
     };
 
     // 4) Perfil de optimización: forma de la curva net-param.
-    let perfil = match ops::opt_profile(core, cfg) {
+    let perfil = match ops::opt_profile_all(core, cfg) {
         Ok(v) => {
-            let shape = v["shape"].as_str().unwrap_or("puntual");
-            let from = v["stableFrom"].as_f64().unwrap_or(0.0);
-            let to = v["stableTo"].as_f64().unwrap_or(0.0);
-            let detalle = match shape {
-                "meseta" => format!("meseta · zona estable {from:.1}–{to:.1}"),
-                "unimodal" => format!("unimodal · zona estable {from:.1}–{to:.1}"),
-                _ => format!("puntual · sin meseta estable ({from:.1}–{to:.1})"),
-            };
-            match shape {
-                "meseta" => check("pass", detalle, Some(to - from)),
-                "unimodal" => check("warn", detalle, Some(to - from)),
-                _ => check("fail", detalle, Some(to - from)),
+            let profiles = v["profiles"].as_array().cloned().unwrap_or_default();
+            let mesetas = profiles.iter().filter(|profile| profile["shape"] == "meseta").count();
+            let unimodales = profiles.iter().filter(|profile| profile["shape"] == "unimodal").count();
+            let failed = profiles.iter().filter(|profile| profile["shape"] == "puntual").count();
+            let detalle = format!(
+                "{mesetas}/{} parámetros en meseta, {unimodales} unimodales, {failed} puntuales",
+                profiles.len()
+            );
+            if profiles.is_empty() {
+                pending("no se pudo perfilar ningún parámetro activo")
+            } else if failed > 0 {
+                check("fail", detalle, Some(mesetas as f64 / profiles.len() as f64 * 100.0))
+            } else if unimodales > 0 {
+                check("warn", detalle, Some(mesetas as f64 / profiles.len() as f64 * 100.0))
+            } else {
+                check("pass", detalle, Some(100.0))
             }
         }
         Err(e) => pending(e),
@@ -194,9 +200,10 @@ mod tests {
     }
 
     #[test]
-    fn hay_nueve_pruebas_de_monte_carlo() {
-        assert_eq!(MC_TESTS.len(), 9);
+    fn las_pruebas_monte_carlo_estan_implementadas() {
+        assert_eq!(MC_TESTS.len(), 6);
         assert!(MC_TESTS.contains(&"drawdown"));
+        assert!(MC_TESTS.iter().all(|test| ops::MC_TESTS.contains(test)));
     }
 
     #[test]
@@ -226,7 +233,7 @@ mod tests {
             params: [20.0, 50.0, 0.0],
             bars: vec![],
         };
-        let v = for_strategy(&core, &EngineCfg::default());
+        let v = for_strategy(&core, &EngineCfg::default(), false);
         for k in ["walkForward", "monteCarlo", "spp", "perfil"] {
             assert_eq!(v[k]["estado"], "pending", "falta {k}");
         }
@@ -235,7 +242,7 @@ mod tests {
     #[test]
     fn los_cuatro_veredictos_se_calculan_con_datos_reales() {
         let core = core_con_datos();
-        let v = for_strategy(&core, &EngineCfg::default());
+        let v = for_strategy(&core, &EngineCfg::default(), true);
         for k in ["walkForward", "monteCarlo", "spp", "perfil"] {
             let estado = v[k]["estado"].as_str().unwrap_or("");
             assert!(
@@ -247,7 +254,17 @@ mod tests {
                 "falta detalle en {k}"
             );
         }
-        // el WFE siempre se calcula con barras suficientes
-        assert!(v["walkForward"]["valor"].is_number());
+        let oos_trades = ops::wfe_oos_trade_count(
+            &core.bars,
+            core.template,
+            core.params,
+            &EngineCfg::default(),
+        );
+        if oos_trades < MIN_OOS_TRADES {
+            assert_eq!(v["walkForward"]["estado"], "pending");
+            assert!(v["walkForward"]["detalle"].as_str().unwrap().contains("muestra OOS insuficiente"));
+        } else {
+            assert!(v["walkForward"]["valor"].is_number());
+        }
     }
 }

@@ -144,11 +144,14 @@ pub struct Robustness {
     pub score: f64,
     /// true si el score incluye SPP y perfil (etapa "avanzada").
     pub avanzado: bool,
+    /// true solo cuando todas las comprobaciones estrictas pasan.
+    #[serde(default)]
+    pub calificado: bool,
 }
 
 impl Default for Robustness {
     fn default() -> Self {
-        Self { wfe: 0.0, mc_survival: 0.0, spp: 0.0, perfil: 0.0, score: 0.0, avanzado: false }
+        Self { wfe: 0.0, mc_survival: 0.0, spp: 0.0, perfil: 0.0, score: 0.0, avanzado: false, calificado: false }
     }
 }
 
@@ -174,6 +177,7 @@ pub fn quick(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) ->
         perfil: 0.0,
         score: round2(score),
         avanzado: false,
+        calificado: false,
     }
 }
 
@@ -188,7 +192,8 @@ pub fn full(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -> 
         params,
         bars: bars.to_vec(),
     };
-    r.spp = match super::ops::spp(&core, cfg) {
+    let spp_result = super::ops::spp(&core, cfg);
+    r.spp = match &spp_result {
         Ok(v) => {
             let results = v["results"].as_array().cloned().unwrap_or_default();
             let peor = results
@@ -204,20 +209,66 @@ pub fn full(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -> 
         }
         Err(_) => 0.0,
     };
-    r.perfil = match super::ops::opt_profile(&core, cfg) {
-        Ok(v) => match v["shape"].as_str().unwrap_or("puntual") {
-            "meseta" => 100.0,
-            "unimodal" => 60.0,
-            _ => 20.0,
-        },
+    let train_cut = (bars.len() * 6 / 10).max(60).min(bars.len());
+    let profile_core = super::ops::StrategyCore {
+        id: core.id,
+        name: core.name.clone(),
+        template: core.template,
+        params: core.params,
+        bars: bars[..train_cut].to_vec(),
+    };
+    let profile_result = super::ops::opt_profile_all(&profile_core, cfg);
+    r.perfil = match &profile_result {
+        Ok(v) => v["profiles"].as_array().map(|profiles| {
+            profiles.iter().map(|p| profile_score(p["shape"].as_str().unwrap_or("puntual")))
+                .fold(100.0_f64, f64::min)
+        }).unwrap_or(0.0),
         Err(_) => 0.0,
     };
+
+    let tests: Vec<String> = super::verdicts::MC_TESTS.iter().map(|test| test.to_string()).collect();
+    let mc_pass = super::ops::mc_suite(&core, cfg, &tests, 60)
+        .ok()
+        .and_then(|v| v["results"].as_array().cloned())
+        .map(|results| {
+            results.len() == tests.len() && results.iter().all(|result| result["passed"] == true)
+        })
+        .unwrap_or(false);
+    let spp_pass = spp_result.as_ref().map(|v| {
+        v["results"].as_array().map(|results| {
+            !results.is_empty() && results.iter().all(|result| result["verdict"] == "pass")
+        }).unwrap_or(false)
+    }).unwrap_or(false);
+    let profile_pass = profile_result.as_ref().map(|v| {
+        v["profiles"].as_array().map(|profiles| {
+            !profiles.is_empty() && profiles.iter().all(|profile| profile["shape"] == "meseta")
+        }).unwrap_or(false)
+    }).unwrap_or(false);
+    let oos_trades = super::ops::wfe_oos_trade_count(bars, tmpl, params, cfg);
+    r.calificado = strictly_qualified(r.wfe, oos_trades, mc_pass, spp_pass, profile_pass);
+
     r.score = round2(0.35 * r.wfe.max(0.0).min(100.0)
         + 0.30 * r.mc_survival
         + 0.20 * r.spp
         + 0.15 * r.perfil);
     r.avanzado = true;
     r
+}
+
+fn profile_score(shape: &str) -> f64 {
+    match shape {
+        "meseta" => 100.0,
+        "unimodal" => 60.0,
+        _ => 20.0,
+    }
+}
+
+fn strictly_qualified(wfe: f64, oos_trades: u32, mc_pass: bool, spp_pass: bool, profile_pass: bool) -> bool {
+    wfe >= super::verdicts::WFE_PASS
+        && oos_trades >= super::verdicts::MIN_OOS_TRADES
+        && mc_pass
+        && spp_pass
+        && profile_pass
 }
 
 /// Pesos del score avanzado (se muestran en la interfaz).
@@ -289,5 +340,15 @@ mod tests {
             assert!(metric_exists(key), "falta {key}");
             assert!(metric_value(&m(1.0, 1.0, 1.0, 10), key).is_some(), "sin valor {key}");
         }
+    }
+
+    #[test]
+    fn calificacion_estricta_exige_todas_las_validaciones_y_muestra_oos() {
+        assert!(strictly_qualified(50.0, 30, true, true, true));
+        assert!(!strictly_qualified(49.99, 30, true, true, true));
+        assert!(!strictly_qualified(50.0, 29, true, true, true));
+        assert!(!strictly_qualified(50.0, 30, false, true, true));
+        assert!(!strictly_qualified(50.0, 30, true, false, true));
+        assert!(!strictly_qualified(50.0, 30, true, true, false));
     }
 }

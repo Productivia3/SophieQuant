@@ -313,44 +313,28 @@ export const api = {
     return db.strategies.find(s => s.id === id) ?? null
   },
 
-  // robustez (fake)
+  // robustez
   async runMonteCarlo(strategyId: number, cfg: Record<string, unknown> = {}): Promise<Verdict2> {
     void cfg
-    const suite = await real<{ results?: Array<{ passed: boolean; passRate: number }> }>('run_mc_suite', { strategyId, tests: ['shuffle'] })
-    if (suite) {
-      const r0 = suite.results?.[0]
-      return { testType: 'monte_carlo', verdict: r0?.passed ? 'pass' : 'fail', details: { trials: 100, passed: r0?.passRate ?? 0 } }
+    const suite = await real<McSuiteResult>('run_mc_suite', { strategyId, tests: ['shuffle'] })
+    if (!suite?.results?.[0]) throw new Error('Monte Carlo solo está disponible con el motor real de escritorio.')
+    return {
+      testType: 'monte_carlo',
+      verdict: suite.results[0].passed ? 'pass' : 'fail',
+      details: { trials: suite.results[0].trials, passed: suite.results[0].passRate },
     }
-    await delay(400)
-    const s = db.strategies.find(x => x.id === strategyId)
-    const v = s && s.lastRun?.metrics?.profitFactor != null && s.lastRun.metrics.profitFactor > 1.15 ? 'pass' : 'fail'
-    return { testType: 'monte_carlo', verdict: v, details: { trials: 1000, passed: v === 'pass' ? 0.92 : 0.31 } }
   },
 
-  // Monte Carlo multi-test (fake): corre los tipos seleccionados y devuelve veredicto por test
+  // Monte Carlo multi-test; requiere el motor Rust de escritorio.
   async runMonteCarloSuite(strategyId: number, tests: string[]): Promise<McSuiteResult> {
-    const r = await real<McSuiteResult['results']>('run_mc_suite', { strategyId, tests })
-    if (r) return { strategyId, results: r }
-    await delay(600)
-    // (el registro en el historial lo hace el metodo real; aqui solo el fake)
-    const s = db.strategies.find(x => x.id === strategyId)
-    const base = s?.lastRun?.metrics?.profitFactor ?? 1
-    return {
-      strategyId,
-      results: tests.map((t, i) => {
-        const p = Math.max(0.02, Math.min(0.99, 0.95 - i * 0.11 - (base > 1.4 ? 0.1 : 0.35) + rnd() * 0.15))
-        return {
-          test: t,
-          passed: p >= 0.5,
-          passRate: +p.toFixed(2),
-          percentiles: {
-            p5: +(base * (0.35 + rnd() * 0.2)).toFixed(2),
-            p50: +(base * (0.75 + rnd() * 0.15)).toFixed(2),
-            p95: +(base * (0.95 + rnd() * 0.2)).toFixed(2),
-          },
-        }
-      }),
+    const r = await real<McSuiteResult>('run_mc_suite', { strategyId, tests })
+    if (!r) {
+      throw new Error('Monte Carlo solo está disponible con el motor real de escritorio. No se muestran resultados simulados.')
     }
+    if (!Array.isArray(r.results)) {
+      throw new Error('El motor devolvió un resultado de Monte Carlo con un formato no válido.')
+    }
+    return r
   },
 
   // WFMatrix (fake): heat map de combos (paramA × paramB) con clusters estables
@@ -540,26 +524,7 @@ export const api = {
   async runSpp(strategyId: number): Promise<SppResult> {
     const r = await real<SppResult>('run_spp', { strategyId })
     if (r) return r
-    await delay(1200)
-    const tests = [
-      { key: 'entry_reversal', label: 'Entradas revertidas' },
-      { key: 'exit_reversal', label: 'Salidas revertidas' },
-      { key: 'trade_split', label: 'Operaciones divididas' },
-      { key: 'opposite', label: 'Señal opuesta' },
-      { key: 'param_permute', label: 'Permutación de parámetros' },
-      { key: 'random_entry', label: 'Entradas aleatorias' },
-    ]
-    const s = db.strategies.find(x => x.id === strategyId)
-    const strong = (s?.lastRun?.metrics?.profitFactor ?? 1) > 1.35
-    const results = tests.map(t => {
-      const impact = +(2 + rnd() * (strong ? 12 : 38)).toFixed(1)  // % de cambio del net
-      return { ...t, impactPct: impact, verdict: impact < 10 ? ('pass' as const) : impact < 25 ? ('warn' as const) : ('fail' as const) }
-    })
-    const overall = results.every(r => r.verdict !== 'fail') ? 'pass' : 'fail'
-    const peor = results.reduce((m, r) => Math.max(m, r.impactPct), 0)
-    this._fakeAnalysis(strategyId, 'spp', overall, `impacto maximo ${peor.toFixed(1)} %`,
-      { impactoMax: Math.round(peor * 10) / 10 })
-    return { strategyId, results, overall }
+    throw new Error('SPP requiere la aplicación de escritorio y el motor Rust; el navegador no genera resultados simulados.')
   },
 
   async getCorrelationMatrix(strategyIds: number[]): Promise<CorrelationMatrix> {
@@ -1158,10 +1123,10 @@ export const api = {
       strategyId: id,
       nombre: db.strategies.find(s => s.id === id)?.name ?? `#${id}`,
       checks: {
-        walkForward: { estado: 'pending' as const, detalle: 'sin calcular', valor: null },
-        monteCarlo: { estado: 'pending' as const, detalle: 'sin calcular', valor: null },
-        spp: { estado: 'pending' as const, detalle: 'sin calcular', valor: null },
-        perfil: { estado: 'pending' as const, detalle: 'sin calcular', valor: null },
+        walkForward: { estado: 'pending' as const, detalle: 'requiere la aplicación de escritorio', valor: null },
+        monteCarlo: { estado: 'pending' as const, detalle: 'requiere la aplicación de escritorio', valor: null },
+        spp: { estado: 'pending' as const, detalle: 'requiere la aplicación de escritorio', valor: null },
+        perfil: { estado: 'pending' as const, detalle: 'requiere la aplicación de escritorio', valor: null },
       },
       overall: 'pending' as const,
       calculadoEn: null,
@@ -1183,18 +1148,17 @@ export const api = {
         if (!row) throw new Error(`El motor no devolvió el veredicto de la estrategia ${id}.`)
         result = row
       } else {
-        await delay(80)
         result = {
           strategyId: id,
           nombre: db.strategies.find(s => s.id === id)?.name ?? `#${id}`,
           checks: {
-            walkForward: { estado: 'warn', detalle: 'WFE 48.2 % · umbral 50 %', valor: 48.2 },
-            monteCarlo: { estado: 'pass', detalle: '9/9 pruebas superadas', valor: 1 },
-            spp: { estado: 'pass', detalle: 'impacto máximo 6.4 %', valor: 6.4 },
-            perfil: { estado: 'warn', detalle: 'unimodal · zona estable 12.0–24.0', valor: 12 },
+            walkForward: { estado: 'pending', detalle: 'requiere la aplicación de escritorio', valor: null },
+            monteCarlo: { estado: 'pending', detalle: 'requiere la aplicación de escritorio', valor: null },
+            spp: { estado: 'pending', detalle: 'requiere la aplicación de escritorio', valor: null },
+            perfil: { estado: 'pending', detalle: 'requiere la aplicación de escritorio', valor: null },
           },
-          overall: 'warn',
-          calculadoEn: Math.floor(Date.now() / 1000),
+          overall: 'pending',
+          calculadoEn: null,
         }
       }
       rows.push(result)
@@ -1235,6 +1199,8 @@ export interface McSuiteResult {
     test: string
     passed: boolean
     passRate: number
+    metric: 'netProfit' | 'maxDrawdown'
+    trials: number
     percentiles: { p5: number; p50: number; p95: number }
   }>
 }
@@ -1347,7 +1313,7 @@ export interface OptimizerResult {
 export interface SppResult {
   strategyId: number
   results: Array<{ key: string; label: string; impactPct: number; verdict: 'pass' | 'warn' | 'fail' }>
-  overall: 'pass' | 'fail'
+  overall: 'pass' | 'warn' | 'fail'
 }
 export interface CorrelationMatrix {
   ids: number[]

@@ -34,19 +34,19 @@ test.describe('Filtros y selección por robustez', () => {
     expect(await page.getByLabel(/Métrica del filtro/).count()).toBe(antes)
   })
 
-  test('F-H2 el selector de robustez explica los pesos del score', async ({ page }) => {
+  test('F-H2 el filtro estricto explica los requisitos de calificación', async ({ page }) => {
     await page.goto('/#/build/new')
-    await expect(page.getByLabel(/ordenar por robustez/i)).toBeChecked()
-    await expect(page.getByText(/gana la estrategia que aguanta/i)).toBeVisible()
+    await expect(page.getByLabel(/exigir robustez estricta/i)).toBeChecked()
+    await expect(page.getByText(/solo se guardan las que pasan todos los criterios/i)).toBeVisible()
+    await expect(page.getByText(/OOS ≥ 30 operaciones/i)).toBeVisible()
     await expect(page.getByText(/eficiencia walk-forward/i).first()).toBeVisible()
-    // al desactivarlo desaparece la explicacion
-    await page.getByLabel(/ordenar por robustez/i).uncheck()
-    await expect(page.getByText(/gana la estrategia que aguanta/i)).toHaveCount(0)
+    await page.getByLabel(/exigir robustez estricta/i).uncheck()
+    await expect(page.getByText(/solo se guardan las que pasan todos los criterios/i)).toHaveCount(0)
   })
 
   test('F-H3 el banco muestra la columna de score', async ({ page }) => {
     await page.goto('/#/bank')
-    await expect(page.getByRole('columnheader', { name: /^score$/i })).toBeVisible()
+    await expect(page.getByRole('columnheader', { name: /score/i })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: /robustez/i })).toBeVisible()
 
     const a11y = await new AxeConstructor({ page }).analyze()

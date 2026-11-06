@@ -108,6 +108,7 @@ create table if not exists strategy_verdicts (
   estado text not null check (estado in ('pass','warn','fail','pending')),
   detalle text not null default '',
   valor real,
+  method_version integer not null default 0,
   calculado_en integer not null default (unixepoch())
 );
 create index if not exists idx_verdicts_strategy

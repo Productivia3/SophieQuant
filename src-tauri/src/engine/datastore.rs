@@ -46,6 +46,7 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
         ("backtest_runs", "oos_frac", "real"),
         ("strategies", "robust_score", "real"),
         ("strategies", "robust_detail", "jsonb"),
+        ("strategy_verdicts", "method_version", "integer not null default 0"),
     ] {
         ensure_column(conn, table, column, definition)?;
     }
@@ -550,8 +551,19 @@ mod tests {
                 pip_size real not null default 0.0001,
                 commission real not null default 0
             );
+            create table strategy_verdicts (
+                id integer primary key,
+                strategy_id integer not null,
+                check_key text not null,
+                estado text not null,
+                detalle text not null default '',
+                valor real,
+                calculado_en integer not null default 0
+            );
             insert into symbols (id, name, asset_class, tick_size, pip_size, commission)
-            values (7, 'EURUSD', 'forex', 0.00001, 0.0001, 2.5);",
+            values (7, 'EURUSD', 'forex', 0.00001, 0.0001, 2.5);
+            insert into strategy_verdicts (id, strategy_id, check_key, estado)
+            values (1, 1, 'walkForward', 'pass');",
         )
         .unwrap();
 
@@ -571,6 +583,12 @@ mod tests {
         assert_eq!(contract_size, 100_000.0);
         assert_eq!(swap_long, 0.0);
         assert_eq!(spread_asia, None);
+        let method_version: i64 = conn.query_row(
+            "select method_version from strategy_verdicts limit 1",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(method_version, 0, "los veredictos previos deben quedar obsoletos");
     }
 
     /// Los veredictos se guardan y se releen: es la cache que pinta la tarjeta.

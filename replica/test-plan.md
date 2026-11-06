@@ -17,6 +17,8 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | F01-E2 | generar estrategias | edge: doble clic en "Correr build" | doble submit rápido | sin crash, aterriza en S03 | e2e | ✓ |
 | F01-E3 | generar estrategias | edge: refresh mid-build | refrescar S03 mientras el build está activo/pausado | estado y número de pasadas recuperados desde SQLite | Tauri | ✓ (build 4: paused, 15/100 tras refresh; cancelado al acabar) |
 | F01-E4 | generar estrategias | edge: objetivo fuera de rango | nTarget=9 | input clampa a min 10, corre igual | e2e | ✓ |
+| F01-R1 | robustez estricta | unitario | probar límites WFE/OOS y cada check MC, SPP y perfil | solo califica si todos pasan y hay al menos 30 operaciones OOS | Rust | ✓ |
+| F01-R2 | robustez estricta | edge: evidencia incompleta o dataset distinto | persistencia/lectura del score y veredictos | pendiente, estrategia no calificada o dataset distinto no presenta score vigente | Rust | ✓ |
 | F01-N1 | generar estrategias | negative: build inexistente | /#/build/run/9999 | sin crash (badge pending, 0 pasadas) | e2e | ✓ |
 | F02-H1 | revisar resultados | happy | S04 → fila → S05 | 6 statcards + equity, sin NaN/undefined | e2e | ✓ |
 | F02-E1 | revisar resultados | edge: estrategia dirty | abrir estrategia 3 | aviso de revisión visible | e2e | ✓ |
@@ -39,6 +41,12 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | S23-H1 | ajustes | happy: metadatos de mercado | abrir S23 y consultar símbolos | muestra los campos reales editables | e2e | ✓ |
 | F10-H1 | retest | happy | S04 multi → S08 | resultados con veredicto | e2e | ✓ |
 | F11-H1 | analyzer | happy | S24 | resumen, MC de cartera y gestión de capital | e2e | ✓ |
+| F13-H1 | Monte Carlo | happy: command nativo devuelve `{ strategyId, results }` | S13 → "Correr simulaciones" | tabla muestra métrica/unidad, percentiles e iteraciones | e2e | ✓ |
+| F13-E2 | Monte Carlo | edge: abrir desde navegador sin motor Rust | /#/montecarlo en navegador | botón bloqueado e indicación de que no se generan resultados simulados | e2e | ✓ |
+| F13-E1 | Monte Carlo | edge: fallo del command | S13 → "Correr simulaciones" → `invoke` rechaza | error visible, controles recuperados y puede reintentarse | e2e | ✓ |
+| F05-E1 | SPP | edge: abrir en navegador sin motor Rust | /#/robustness | botón bloqueado e indicación de que no se generan resultados simulados | e2e | ✓ |
+| V-H1/V-H2 | veredictos | edge: navegador sin motor Rust | veredictos en detalle y banco | no se calculan ni presentan resultados de robustez simulados | e2e | ✓ |
+| H-E1 | historial | edge: SPP no ejecutado en navegador | abrir SPP y luego Historial | aviso de requisito Tauri; no aparece una ejecución ficticia | e2e | ✓ |
 | X-H1 | transversal | navegación completa | rutas del Shell | sin console errors ni 5xx | e2e | ✓ (22/22) |
 | X-H2 | transversal | axe | 6 pantallas clave | 0 violaciones | e2e | ✓ (tras BUG-001/002) |
 | X-404 | transversal | negative | /#/no-existe | 404 propio | e2e | ✓ |
@@ -55,6 +63,23 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 - Smoke tests Tauri: importación CSV, generación/persistencia tras refresco, banco, exportación válida y negativa correctos.
 - La ventana usó el identificador `com.sophiequant.qa`; la base normal `%APPDATA%\\com.sophiequant.app\\sophiequant.db` no se modificó.
 - El import se invocó con un CSV sintético de 800 barras mediante el command real; el selector nativo de archivos no se automatizó.
+
+## Revalidación Monte Carlo (2026-11-06)
+
+- Playwright: suite completa, **112/112** correctos; incluye F13-H1, F13-E1 y F13-E2.
+- Rust: **78/78** tests correctos.
+- `npm run build`: correcto.
+- F13-H1 comprueba el contrato `{ strategyId, results }`, las métricas/unidades e iteraciones; F13-E1 verifica la recuperación tras error y F13-E2 que el navegador no ofrece resultados sintéticos.
+- El cálculo nativo se movió a `spawn_blocking` y ya no conserva el mutex de SQLite durante las iteraciones. Falta un pase manual en la ventana Tauri con un dataset real grande para medir su duración; no se usó ningún histórico personal.
+- F13 ofrece seis pruebas implementadas; shuffle y bootstrap de drawdown calculan drawdown, se rechazan tipos sin implementación y los percentiles incluyen su métrica/unidad.
+
+## Revalidación de robustez estricta
+
+- Rust: **81/81** tests correctos. La calificación requiere todos los criterios; la puntuación solo ordena candidatos ya calificados.
+- `npm run build`: correcto.
+- Playwright: suite completa, **112/112** correctos tras actualizar una prueba obsoleta. El primer intento tuvo un timeout en H-H1 porque esperaba un resultado SPP del navegador; ahora el navegador bloquea correctamente esos cálculos. Se cambió a H-E1, que verifica el bloqueo y que no se crea una entrada falsa; el spec enfocado pasó **3/3** y la suite completa posterior pasó **112/112**.
+- Los veredictos antiguos se invalidan por versión; las puntuaciones solo se exponen si la estrategia sigue calificada para el mismo dataset.
+- El requisito estricto puede dejar el banco sin estrategias calificadas. La validación en ventana Tauri y con datos reales aún está pendiente; los tests no garantizan rentabilidad futura.
 
 ## Bugs encontrados y su estado
 
