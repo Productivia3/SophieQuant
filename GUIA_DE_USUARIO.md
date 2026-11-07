@@ -25,6 +25,9 @@ en esta versión.
 12. [Glosario sencillo](#12-glosario-sencillo)
 13. [Privacidad y copia de seguridad](#13-privacidad-y-copia-de-seguridad)
 
+Para validar la aplicación paso a paso, consulta también la
+[Guía de pruebas manuales](./PRUEBAS_MANUALES.md).
+
 ## 1. Antes de empezar
 
 ### Comprueba que has abierto la aplicación correcta
@@ -283,11 +286,23 @@ describe esa muestra y no garantiza resultados futuros.
 
 ### Optimizador
 
-Selecciona una estrategia y compara **Simple** o **Walk-Forward**. El gráfico
-representa combinaciones de parámetros y su factor de beneficio. El mejor punto
-no es automáticamente la mejor elección: escoger el máximo absoluto puede
-ajustarse demasiado al histórico. Prioriza zonas consistentes y vuelve a probar
-fuera de muestra.
+Selecciona una estrategia y compara **Simple** o **Walk-Forward**. El resultado
+es una tabla de calor: las columnas son el primer parámetro y las filas el
+segundo; cada casilla muestra una combinación. El borde resalta la combinación
+seleccionada por el criterio del modo.
+
+- **Simple** muestra el factor de beneficio (PF) y el drawdown de cada
+  combinación. PF menor que 1 indica que la pérdida bruta supera al beneficio
+  bruto; los colores ayudan a localizar las zonas con mejor resultado.
+- **Walk-Forward** muestra WFE en porcentaje: cuánto profit factor conserva el
+  tramo fuera de muestra respecto al tramo de entrenamiento, además del
+  drawdown y el veredicto. La combinación resaltada maximiza
+  `WFE − 0,3 × drawdown`. La leyenda indica los umbrales de alerta y aprobado.
+
+Los ejes recorren aproximadamente del 40% al 220% del valor actual de cada
+parámetro. El mejor punto no es automáticamente la mejor elección: escoger el
+máximo absoluto puede ajustarse demasiado al histórico. Prioriza zonas
+consistentes y vuelve a probar fuera de muestra.
 
 ## 7. Editar y mejorar una estrategia
 

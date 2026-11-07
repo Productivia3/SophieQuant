@@ -500,25 +500,44 @@ export const api = {
   },
 
   async runOptimizer(strategyId: number, opts: { paramA: string; paramB: string; steps: number; kind: 'simple' | 'wf' }): Promise<OptimizerResult> {
-    const r = await real<OptimizerResult>('run_optimizer', { strategyId, paramA: opts.paramA, paramB: opts.paramB, steps: opts.steps, kind: opts.kind })
-    if (r) return r
+    const r = await real<unknown>('run_optimizer', { strategyId, paramA: opts.paramA, paramB: opts.paramB, steps: opts.steps, kind: opts.kind })
+    if (r != null) {
+      if (!isOptimizerResult(r) || r.kind !== opts.kind) {
+        throw new Error('El motor devolvió un resultado de optimización incompatible con el modo seleccionado.')
+      }
+      return r
+    }
     await delay(1100)
     const N = Math.max(3, Math.min(9, opts.steps))
     const aValues = Array.from({ length: N }, (_, i) => 5 + i * 5)
     const bValues = Array.from({ length: N }, (_, i) => +(0.5 + i * 0.25).toFixed(2))
-    const wfDiscount = opts.kind === 'wf' ? 0.55 : 1.0
+    if (opts.kind === 'wf') {
+      const cells = aValues.flatMap((a, i) =>
+        bValues.map((b, j) => {
+          const stable = i >= 1 && i <= 4 && j >= 2 && j <= 4
+          const wfe = +(stable ? 55 + rnd() * 45 : rnd() * 55).toFixed(1)
+          const maxDD = +(8 + rnd() * (stable ? 18 : 45)).toFixed(1)
+          return { a, b, wfe, maxDD, verdict: wfe >= 50 ? 'pass' as const : wfe >= 35 ? 'warn' as const : 'fail' as const }
+        }))
+      const best = cells.reduce((m, c) => c.wfe > m.wfe ? c : m, cells[0])
+      this._fakeAnalysis(strategyId, 'optimizer',
+        best.wfe >= 50 ? 'pass' : best.wfe >= 35 ? 'warn' : 'fail',
+        `${opts.paramA}=${best.a} · ${opts.paramB}=${best.b}`,
+        { wfe: best.wfe, maxDD: best.maxDD }, { ...opts })
+      return { strategyId, kind: 'wf', paramA: opts.paramA, paramB: opts.paramB, aValues, bValues, cells, best }
+    }
     const cells = aValues.flatMap((a, i) =>
       bValues.map((b, j) => {
         const stable = i >= 1 && i <= 4 && j >= 2 && j <= 4
-        const pf = (stable ? 1.6 + rnd() * 0.8 : 0.5 + rnd() * 1.1) * wfDiscount * (1 + rnd() * 0.1)
-        return { a, b, pf: +pf.toFixed(2), maxDD: +(8 + rnd() * (stable ? 18 : 45)).toFixed(1) }
+        const pf = +(stable ? 1.6 + rnd() * 0.8 : 0.5 + rnd() * 1.1).toFixed(2)
+        return { a, b, pf, maxDD: +(8 + rnd() * (stable ? 18 : 45)).toFixed(1) }
       }))
-    const best = cells.reduce((m, c) => (c.pf > m.pf ? c : m), cells[0])
+    const best = cells.reduce((m, c) => c.pf > m.pf ? c : m, cells[0])
     this._fakeAnalysis(strategyId, 'optimizer',
       best.pf >= 1.15 ? 'pass' : best.pf >= 0.95 ? 'warn' : 'fail',
       `${opts.paramA}=${best.a} · ${opts.paramB}=${best.b}`,
       { pf: best.pf, maxDD: best.maxDD }, { ...opts })
-    return { strategyId, kind: opts.kind, paramA: opts.paramA, paramB: opts.paramB, aValues, bValues, cells, best }
+    return { strategyId, kind: 'simple', paramA: opts.paramA, paramB: opts.paramB, aValues, bValues, cells, best }
   },
 
   async runSpp(strategyId: number): Promise<SppResult> {
@@ -1300,15 +1319,56 @@ export interface ImproverResult {
   variants: Array<{ name: string; metrics: Metrics | null; improvement: number | null }>
   bestVariant: string | null
 }
-export interface OptimizerResult {
+interface OptimizerResultBase {
   strategyId: number
-  kind: 'simple' | 'wf'
   paramA: string
   paramB: string
   aValues: number[]
   bValues: number[]
-  cells: Array<{ a: number; b: number; pf: number; maxDD: number }>
-  best: { a: number; b: number; pf: number; maxDD: number }
+}
+export type OptimizerResult =
+  | (OptimizerResultBase & {
+    kind: 'simple'
+    cells: Array<{ a: number; b: number; pf: number; maxDD: number }>
+    best: { a: number; b: number; pf: number; maxDD: number }
+  })
+  | (OptimizerResultBase & {
+    kind: 'wf'
+    cells: Array<{ a: number; b: number; wfe: number; maxDD: number; verdict: 'pass' | 'warn' | 'fail' }>
+    best: { a: number; b: number; wfe: number; maxDD: number; verdict: 'pass' | 'warn' | 'fail' }
+  })
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function isOptimizerResult(value: unknown): value is OptimizerResult {
+  if (!isRecord(value) || !isFiniteNumber(value.strategyId) ||
+      typeof value.paramA !== 'string' || typeof value.paramB !== 'string' ||
+      !Array.isArray(value.aValues) || !value.aValues.length ||
+      !value.aValues.every(isFiniteNumber) ||
+      !Array.isArray(value.bValues) || !value.bValues.length ||
+      !value.bValues.every(isFiniteNumber) ||
+      !Array.isArray(value.cells) || !value.cells.length || !isRecord(value.best)) return false
+
+  const validCommon = (cell: unknown): cell is Record<string, unknown> & { a: number; b: number } =>
+    isRecord(cell) && isFiniteNumber(cell.a) && isFiniteNumber(cell.b)
+  if (value.kind === 'simple') {
+    const validSimple = (cell: unknown) =>
+      validCommon(cell) && isFiniteNumber(cell.pf) && isFiniteNumber(cell.maxDD)
+    return value.cells.every(validSimple) && validSimple(value.best)
+  }
+  if (value.kind === 'wf') {
+    const validWf = (cell: unknown) =>
+      validCommon(cell) && isFiniteNumber(cell.wfe) && isFiniteNumber(cell.maxDD) &&
+      (cell.verdict === 'pass' || cell.verdict === 'warn' || cell.verdict === 'fail')
+    return value.cells.every(validWf) && validWf(value.best)
+  }
+  return false
 }
 export interface SppResult {
   strategyId: number

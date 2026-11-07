@@ -412,8 +412,8 @@ pub fn run_grid(
         return Err(format!("Estrategia {} sin dataset QFN cargable — importa el CSV primero", core.id));
     }
     let n = steps.max(3).min(9);
-    let a_vals = axis(core.params[0], n);
-    let b_vals = axis(core.params[1], n);
+    let a_vals = axis(core.params[0], n).into_iter().map(|v| v.max(2.0)).collect::<Vec<_>>();
+    let b_vals = axis(core.params[1], n).into_iter().map(|v| v.max(2.0)).collect::<Vec<_>>();
     let mut cells: Vec<Value> = Vec::new();
     let mut best: Option<Value> = None;
     let mut best_score = f64::MIN;
@@ -425,7 +425,7 @@ pub fn run_grid(
                 let wfe = round1(wfe_of(&core.bars, core.template, p, cfg));
                 let s = wfe_of(&core.bars, core.template, p, cfg) - out.metrics.max_dd * 0.3;
                 let verdict = if wfe >= 50.0 { "pass" } else if wfe >= 35.0 { "warn" } else { "fail" };
-                (json!({ "a": a, "b": b, "wfe": wfe, "verdict": verdict }), s)
+                (json!({ "a": a, "b": b, "wfe": wfe, "maxDD": round1(out.metrics.max_dd), "verdict": verdict }), s)
             } else {
                 (json!({ "a": a, "b": b, "pf": round2(out.metrics.profit_factor), "maxDD": round1(out.metrics.max_dd) }),
                  out.metrics.profit_factor)
@@ -1241,6 +1241,36 @@ fn round3(v: f64) -> f64 { (v * 1000.0).round() / 1000.0 }
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optimizer_devuelve_metricas_y_mejor_combinacion_segun_modo() {
+        let core = StrategyCore {
+            id: 1,
+            name: "Optimizer test".into(),
+            template: Template::MaCross,
+            params: [20.0, 50.0, 0.0],
+            bars: serie_con_ciclos(1200),
+        };
+        let cfg = EngineCfg::default();
+
+        let simple = run_grid(&core, &cfg, 3, "simple").unwrap();
+        assert_eq!(simple["cells"].as_array().unwrap().len(), 9);
+        assert!(simple["bValues"].as_array().unwrap().iter().all(|v| v.as_f64().unwrap() >= 2.0));
+        assert!(simple["cells"][0]["pf"].is_number());
+        assert!(simple["cells"][0]["maxDD"].is_number());
+        assert!(simple["best"]["pf"].is_number());
+        assert!(simple["best"]["maxDD"].is_number());
+
+        let wf = run_grid(&core, &cfg, 3, "wf").unwrap();
+        assert_eq!(wf["cells"].as_array().unwrap().len(), 9);
+        assert!(wf["cells"][0]["wfe"].is_number());
+        assert!(wf["cells"][0]["maxDD"].is_number());
+        assert!(wf["cells"][0]["verdict"].is_string());
+        assert!(wf["best"]["wfe"].is_number());
+        assert!(wf["best"]["maxDD"].is_number());
+        assert!(wf["best"]["verdict"].is_string());
+        assert!(wf["best"]["pf"].is_null());
+    }
 
     #[test]
     fn monte_carlo_shuffle_mide_drawdown_y_expone_el_numero_de_iteraciones() {

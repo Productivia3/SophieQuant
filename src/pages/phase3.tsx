@@ -296,56 +296,96 @@ export function S09Improver() {
 
 /* ───────────────────────── S10 · Optimizer + S11 · 3D ─────────────── */
 
-function cellColor(pf: number): string {
-  // escala de veredicto a tokens propios (pas/warn/fail)
-  if (pf >= 1.5) return 'var(--color-success)'
-  if (pf >= 1.15) return 'var(--color-warning)'
-  return 'var(--color-danger)'
-}
-
-/** Mini-superficie isométrica en SVG (bind propia, sin librerías). */
-function IsoSurface({ res }: { res: OptimizerResult }) {
-  const size = res.aValues.length
-  const cell = 46, dx = cell * 0.9, dy = cell * 0.5
-  const W = size * dx * 2 + 120, H = size * dy * 2 + 200
-  const proj = (i: number, j: number, z: number): [number, number] =>
-    [W / 2 + (j - i) * dx, 60 + (j + i) * dy - z]
-
-  const bars = []
-  for (let i = size - 1; i >= 0; i--) {
-    for (let j = size - 1; j >= 0; j--) {
-      const c = res.cells.find(x => x.a === res.aValues[i] && x.b === res.bValues[j])
-      if (!c) continue
-      const z = (c.pf - 0.4) * 46
-      const [x0, y0] = proj(i, j, z)
-      const [x1, y1] = proj(i + 1, j, z)
-      const [x2, y2] = proj(i + 1, j + 1, z)
-      const [x3, y3] = proj(i, j + 1, z)
-      const [, yBase] = proj(i, j, 0)
-      bars.push(
-        <g key={`${i}-${j}`}>
-          {/* cara frontal (hacia vista) */}
-          <polygon points={`${x1},${y1} ${x2},${y2} ${x2},${yBase + 4} ${x1},${yBase + 4}`}
-            fill={cellColor(c.pf)} opacity={0.85} />
-          <polygon points={`${x0},${y0} ${x1},${y1} ${x1},${yBase} ${x0},${yBase}`}
-            fill={cellColor(c.pf)} opacity={0.65} />
-          <polygon points={`${x0},${y0} ${x1},${y1} ${x2},${y2} ${x3},${y3}`}
-            fill={cellColor(c.pf)} opacity={0.95}
-            stroke={c.a === res.best.a && c.b === res.best.b ? 'var(--color-text)' : 'var(--color-border)'}
-            strokeWidth={c.a === res.best.a && c.b === res.best.b ? 2 : 0.5} />
-        </g>,
-      )
+function OptimizerHeatmap({ res }: { res: OptimizerResult }) {
+  const scoreTone = (cell: OptimizerResult['cells'][number]) => {
+    if ('verdict' in cell) {
+      return cell.verdict === 'pass' ? 'bg-success/15 text-success'
+        : cell.verdict === 'warn' ? 'bg-warning/15 text-warning'
+          : 'bg-danger/15 text-danger'
     }
+    return cell.pf >= 1.15 ? 'bg-success/15 text-success'
+      : cell.pf >= 1 ? 'bg-warning/15 text-warning' : 'bg-danger/15 text-danger'
   }
+  const getCell = (a: number, b: number) => res.cells.find(cell => cell.a === a && cell.b === b)
+  const metric = res.kind === 'wf' ? 'WFE' : 'Factor de beneficio (PF)'
+  const selectionRule = res.kind === 'wf'
+    ? 'Walk-Forward resalta la mayor puntuación compuesta (WFE − 0,3 × drawdown).'
+    : 'Simple resalta la combinación con mayor factor de beneficio (PF).'
+
   return (
-    <div className="overflow-auto qf-scroll rounded-md border border-border bg-surface p-2">
-      <svg width={W} height={H} role="img" aria-label={`Superficie 3D de profit factor — mejor combo ${res.best.a}·${res.best.b}`}>
-        {bars}
-        <text x={16} y={H - 8} fill="var(--color-text-muted)" fontSize={12}>
-          {res.paramA} → {res.aValues[0]}…{res.aValues[size - 1]} · {res.paramB} → {res.bValues[0]}…{res.bValues[size - 1]} · modo {res.kind === 'wf' ? 'Walk-Forward' : 'Simple'}
-        </text>
-      </svg>
-    </div>
+    <section className="space-y-3" aria-label="Resultados de la optimización">
+      {res.kind === 'wf' ? (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <StatCard label="WFE de la combinación seleccionada" value={res.best.wfe} unit="%" hint="Porcentaje del profit factor de entrenamiento que se conserva fuera de muestra." />
+          <StatCard label="Mejor combinación" value={`${res.best.a} · ${res.best.b}`} mono={false} />
+          <StatCard label="Drawdown de esa combinación" value={res.best.maxDD} unit="%" />
+          <StatCard label="Veredicto" value={res.best.verdict === 'pass' ? 'Pasa' : res.best.verdict === 'warn' ? 'Alerta' : 'Falla'}
+            tone={res.best.verdict === 'pass' ? 'pass' : res.best.verdict === 'fail' ? 'fail' : 'neutral'} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <StatCard label="Mejor PF" value={res.best.pf} hint="Beneficio bruto dividido por pérdida bruta en el histórico completo." />
+          <StatCard label="Mejor combinación" value={`${res.best.a} · ${res.best.b}`} mono={false} />
+          <StatCard label="Drawdown de esa combinación" value={res.best.maxDD} unit="%" />
+        </div>
+      )}
+      <div className="overflow-x-auto qf-scroll rounded-md border border-border bg-surface p-3">
+        <p className="mb-2 text-sm font-semibold">Mapa de calor · {metric}</p>
+        <p className="mb-3 text-xs text-muted">
+          Columnas: {res.paramA}. Filas: {res.paramB}. Cada celda es una combinación; el borde resalta la combinación seleccionada.
+        </p>
+        <table className="min-w-[620px] border-separate border-spacing-1 text-center text-xs"
+          aria-label={`Mapa de calor de optimización ${res.kind === 'wf' ? 'Walk-Forward por WFE' : 'simple por factor de beneficio'}`}>
+          <thead>
+            <tr>
+              <th scope="col" className="px-2 py-1 text-left text-muted">{res.paramB} ↓ / {res.paramA} →</th>
+              {res.aValues.map(a => <th scope="col" key={a} className="px-2 py-1 font-mono">{fmtNum(a, 1)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {res.bValues.map(b => (
+              <tr key={b}>
+                <th scope="row" className="px-2 py-1 text-right font-mono text-muted">{fmtNum(b, 1)}</th>
+                {res.aValues.map(a => {
+                  const cell = getCell(a, b)
+                  if (!cell) return <td key={a} className="min-w-16 rounded border border-border px-2 py-2 text-muted">—</td>
+                  const isBest = cell.a === res.best.a && cell.b === res.best.b
+                  const value = 'wfe' in cell ? `${fmtNum(cell.wfe, 1)}%` : fmtNum(cell.pf, 2)
+                  const detail = 'wfe' in cell
+                    ? `${cell.verdict === 'pass' ? 'Pasa' : cell.verdict === 'warn' ? 'Alerta' : 'Falla'} · DD ${fmtNum(cell.maxDD, 1)}%`
+                    : `DD ${fmtNum(cell.maxDD, 1)}%`
+                  return (
+                    <td key={a} className={`min-w-16 rounded border px-2 py-1.5 ${scoreTone(cell)} ${isBest ? 'border-text ring-1 ring-text font-bold' : 'border-transparent'}`}
+                      title={`${res.paramA}: ${a} · ${res.paramB}: ${b} · ${metric}: ${value} · ${detail}${isBest ? ' · mejor combinación' : ''}`}>
+                      <span className="block font-mono">{value}</span>
+                      <span className="block text-[10px] opacity-80">{detail}</span>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted" aria-label="Leyenda del mapa">
+          {res.kind === 'wf' ? (
+            <>
+              <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-danger/60" />WFE &lt;35% · Falla</span>
+              <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-warning/60" />35–49,9% · Alerta</span>
+              <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-success/60" />≥50% · Pasa</span>
+            </>
+          ) : (
+            <>
+              <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-danger/60" />PF &lt;1 · pierde</span>
+              <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-warning/60" />1–1,14 · cerca del equilibrio</span>
+              <span><i className="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-success/60" />≥1,15 · favorable en muestra</span>
+            </>
+          )}
+        </div>
+      </div>
+      <p className="text-xs text-muted">
+        Los valores de cada eje recorren aproximadamente del 40% al 220% del parámetro actual. {selectionRule} La mejor celda no garantiza resultados futuros; confirma cualquier elección con datos fuera de muestra.
+      </p>
+    </section>
   )
 }
 
@@ -356,14 +396,20 @@ export function S10Optimizer() {
   const [steps, setSteps] = useState(6)
   const [busy, setBusy] = useState(false)
   const [res, setRes] = useState<OptimizerResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { api.listBank({}).then(rs => { setRows(rs); setSel(rs[0] ?? null) }) }, [])
 
   async function run() {
     if (!sel) return
-    setBusy(true); setRes(null)
-    setRes(await api.runOptimizer(sel.id, { paramA: 'p1 · periodo', paramB: 'p2 · umbral', steps, kind }))
-    setBusy(false)
+    setBusy(true); setRes(null); setError(null)
+    try {
+      setRes(await api.runOptimizer(sel.id, { paramA: 'Parámetro 1', paramB: 'Parámetro 2', steps, kind }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -377,7 +423,10 @@ export function S10Optimizer() {
         <div className="rounded-md border border-border bg-surface p-3">
           <h2 className="mb-2 text-sm font-semibold text-muted">Estrategia</h2>
           <select aria-label="Estrategia a optimizar" className={`w-full ${selectCls}`}
-            value={sel?.id ?? ''} onChange={e => setSel(rows.find(r => r.id === +e.target.value) ?? null)}>
+            value={sel?.id ?? ''} onChange={e => {
+              setSel(rows.find(r => r.id === +e.target.value) ?? null)
+              setRes(null); setError(null)
+            }}>
             {rows.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
           <fieldset className="mt-3">
@@ -385,7 +434,7 @@ export function S10Optimizer() {
             <div className="flex gap-2" role="radiogroup" aria-label="Modo de optimización">
               {(['simple', 'wf'] as const).map(k => (
                 <button key={k} type="button" role="radio" aria-checked={kind === k}
-                  onClick={() => setKind(k)}
+                  onClick={() => { setKind(k); setRes(null); setError(null) }}
                   className={`rounded-md border px-3 py-1.5 text-sm ${kind === k ? 'border-accent text-accent' : 'border-border text-muted hover:border-border-input'}`}>
                   {k === 'simple' ? 'Simple' : 'Walk-Forward'}
                 </button>
@@ -397,27 +446,19 @@ export function S10Optimizer() {
           </label>
           <input id="opt-steps" type="range" min={3} max={9} value={steps}
             aria-label="Pasos por parámetro"
-            onChange={e => setSteps(+e.target.value)} className="w-full" />
+            onChange={e => { setSteps(+e.target.value); setRes(null) }} className="w-full" />
         </div>
 
         <div className="min-w-0 space-y-3">
+          {error && <p className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger" role="alert">
+            No se pudo ejecutar el optimizador: {error}
+          </p>}
           {!res ? (
             <EmptyState title="Sin optimización todavía"
-              hint="Corre una optimización para ver la cuadrícula de combinaciones y la superficie 3D del profit factor." />
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-                <StatCard label="Mejor PF" value={res.best.pf} tone={res.best.pf >= 1.5 ? 'pass' : 'fail'} />
-                <StatCard label="Mejor combo" value={`${res.best.a}·${res.best.b}`} mono={false} />
-                <StatCard label="Max DD del mejor" value={res.best.maxDD} unit="%" tone="fail" />
-              </div>
-              <IsoSurface res={res} />
-              <p className="text-xs text-muted">
-                El marcado es el mejor grupo estable. En modo Walk-Forward el PF se calcula
-                también en los segmentos fuera de muestra (EFW separado en la WFMatrix, S12).
-              </p>
-            </>
-          )}
+              hint={kind === 'wf'
+                ? 'Corre el análisis para ver una tabla coloreada de WFE fuera de muestra por cada combinación de parámetros.'
+                : 'Corre el análisis para comparar el factor de beneficio y el drawdown de cada combinación de parámetros.'} />
+          ) : <OptimizerHeatmap res={res} />}
         </div>
       </div>
     </Page>
@@ -430,29 +471,41 @@ export function S11Opt3D() {
   const [sel, setSel] = useState<StrategyRec | null>(null)
   const [busy, setBusy] = useState(false)
   const [res, setRes] = useState<OptimizerResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => { api.listBank({}).then(rs => { setRows(rs); setSel(rs[0] ?? null) }) }, [])
 
   async function run() {
     if (!sel) return
-    setBusy(true); setRes(null)
-    setRes(await api.runOptimizer(sel.id, { paramA: 'p1 · periodo', paramB: 'p2 · umbral', steps: 7, kind: 'wf' }))
-    setBusy(false)
+    setBusy(true); setRes(null); setError(null)
+    try {
+      setRes(await api.runOptimizer(sel.id, { paramA: 'Parámetro 1', paramB: 'Parámetro 2', steps: 7, kind: 'wf' }))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
   }
 
-  useEffect(() => { if (sel && !res && !busy) void run() /* lint-safe: correr una vez */ }, [sel, res, busy])
-  void run
+  useEffect(() => { if (sel && !res && !busy && !error) void run() /* lint-safe: correr una vez */ }, [sel, res, busy, error])
 
   return (
-    <Page title="Superficie 3D" icon={<Ruler size={16} />}
+    <Page title="Mapa de optimización" icon={<Ruler size={16} />}
       actions={
-        <select aria-label="Estrategia para superficie" className={selectCls} value={sel?.id ?? ''}
-          onChange={e => setSel(rows.find(r => r.id === +e.target.value) ?? null)}>
+        <select aria-label="Estrategia para el mapa" className={selectCls} value={sel?.id ?? ''}
+          onChange={e => {
+            setSel(rows.find(r => r.id === +e.target.value) ?? null)
+            setRes(null); setError(null)
+          }}>
           {rows.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
         </select>
       }>
-      <div className="p-4">
-        {res ? <IsoSurface res={res} /> : <TableSkeleton />}
+      <div className="space-y-3 p-4">
+        {error && <p className="rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger" role="alert">
+          No se pudo generar el mapa: {error}
+        </p>}
+        {!rows.length && !busy ? <EmptyState title="No hay estrategias disponibles" hint="Genera una estrategia primero." />
+          : res ? <OptimizerHeatmap res={res} /> : <TableSkeleton />}
       </div>
     </Page>
   )

@@ -49,18 +49,34 @@ test.describe('F03 improver', () => {
   })
 })
 
-test.describe('F04 optimizer + 3D', () => {
-  test('F04-H1 corre optimizer y muestra superficie', async ({ page }) => {
+test.describe('F04 optimizer', () => {
+  test('F04-H1 Simple muestra el mapa PF y drawdown con ejes identificados', async ({ page }) => {
+    await page.goto('/#/optimizer')
+    await page.getByRole('button', { name: /optimizar/i }).click()
+    const mapa = page.getByRole('table', { name: /mapa de calor de optimización simple por factor de beneficio/i })
+    await expect(mapa).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Mejor PF')).toBeVisible()
+    await expect(page.getByText(/drawdown de esa combinación/i)).toBeVisible()
+    await expect(mapa.getByRole('row')).toHaveCount(7)
+    await expect(page.locator('body')).not.toContainText('undefined')
+  })
+
+  test('F04-H2 Walk-Forward muestra WFE, veredicto y celdas, sin campos undefined', async ({ page }) => {
     await page.goto('/#/optimizer')
     await page.getByRole('radio', { name: 'Walk-Forward' }).click()
     await page.getByRole('button', { name: /optimizar/i }).click()
-    await expect(page.getByRole('img', { name: /superficie 3d/i })).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/mejor combo/i)).toBeVisible()
+    const mapa = page.getByRole('table', { name: /mapa de calor de optimización walk-forward por wfe/i })
+    await expect(mapa).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(/WFE de la combinación seleccionada/i)).toBeVisible()
+    await expect(page.getByText('Veredicto')).toBeVisible()
+    await expect(mapa.getByRole('row')).toHaveCount(7)
+    await expect(page.locator('body')).not.toContainText('undefined')
   })
 
-  test('F04-H2 la ruta /strategy/1/opt3d renderiza superficie', async ({ page }) => {
+  test('F04-H3 la ruta /strategy/1/opt3d renderiza el mapa Walk-Forward', async ({ page }) => {
     await page.goto('/#/strategy/1/opt3d')
-    await expect(page.getByRole('img', { name: /superficie 3d/i })).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: 'Mapa de optimización' })).toBeVisible()
+    await expect(page.getByRole('table', { name: /mapa de calor de optimización walk-forward por wfe/i })).toBeVisible({ timeout: 15_000 })
   })
 })
 

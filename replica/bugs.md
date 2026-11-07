@@ -186,6 +186,16 @@ en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe m�
 - Evidence: cobertura Rust en `src-tauri/src/engine/robust.rs`, `ops.rs`, `verdicts.rs` y `genetic.rs`; pruebas e2e en `e2e/f-filters.spec.ts`, `e2e/f-phase3.spec.ts`, `e2e/f-verdicts.spec.ts` y `e2e/f-historial.spec.ts`.
 - Status: **fixed with strict, fail-closed qualification** — se excluyen candidatos que no pasen cada requisito; las advertencias/pendientes no califican; los resultados web simulados están bloqueados; los cachés de versión anterior y los scores de otro dataset no se sirven. La calificación reduce falsos positivos, pero no demuestra rentabilidad futura. Falta validar en la ventana Tauri con un dataset real.
 
+### BUG-017: el optimizador mostraba un gráfico confuso y resultados Walk-Forward indefinidos
+
+- Severity: S2 (una modalidad principal no presentaba resultados legibles).
+- Flow / case: F04 / F04-H1, F04-H2, F04-H3.
+- Steps: abrir Optimizador, ejecutar Simple y luego Walk-Forward; abrir también el mapa desde el detalle de una estrategia.
+- Expected: cada modo muestra sus métricas con ejes y leyenda comprensibles, y se puede distinguir la combinación resaltada.
+- Actual: el SVG isométrico no explicaba los ejes ni los valores. Walk-Forward devolvía `wfe`/`verdict`, mientras la vista intentaba leer `pf`/`maxDD`; el gráfico quedaba vacío y las tarjetas mostraban `undefined`.
+- Evidence: `e2e/f-phase3.spec.ts` F04-H1/H2/H3 y `src-tauri/src/engine/ops.rs` test `optimizer_devuelve_metricas_y_mejor_combinacion_segun_modo`.
+- Status: **fixed** — el mapa tabular presenta PF/DD en Simple y WFE/DD/veredicto en Walk-Forward; se valida el formato devuelto por el motor, se muestra un error explícito ante respuestas incompatibles y el título de la opción de detalle refleja el mapa actual.
+
 ### Límite manual restante
 
 - No se automatizó el diálogo nativo de selección de fichero ni se usaron datos personales. La importación se verificó llamando al command Tauri real con un CSV sintético de 800 barras.

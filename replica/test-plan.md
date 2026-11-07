@@ -20,6 +20,10 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | F01-R1 | robustez estricta | unitario | probar límites WFE/OOS y cada check MC, SPP y perfil | solo califica si todos pasan y hay al menos 30 operaciones OOS | Rust | ✓ |
 | F01-R2 | robustez estricta | edge: evidencia incompleta o dataset distinto | persistencia/lectura del score y veredictos | pendiente, estrategia no calificada o dataset distinto no presenta score vigente | Rust | ✓ |
 | F01-N1 | generar estrategias | negative: build inexistente | /#/build/run/9999 | sin crash (badge pending, 0 pasadas) | e2e | ✓ |
+| F04-H1 | optimizador | Simple | S10 → Simple → Optimizar | tabla por combinación con ejes, PF, drawdown, leyenda y mejor punto | e2e | ✓ |
+| F04-H2 | optimizador | Walk-Forward | S10 → Walk-Forward → Optimizar | tabla WFE/DD/veredicto; sin campos undefined | e2e | ✓ |
+| F04-H3 | optimizador | detalle | S11 → elegir estrategia | mapa Walk-Forward se carga para la estrategia elegida | e2e | ✓ |
+| F04-R1 | optimizador | contrato del motor | evaluar grid simple y WF | cada modo devuelve sus métricas propias y una mejor combinación válida | Rust | ✓ |
 | F02-H1 | revisar resultados | happy | S04 → fila → S05 | 6 statcards + equity, sin NaN/undefined | e2e | ✓ |
 | F02-E1 | revisar resultados | edge: estrategia dirty | abrir estrategia 3 | aviso de revisión visible | e2e | ✓ |
 | F02-E2 | revisar resultados | edge: estrategia sin runs | /#/strategy/9999 | pantalla de carga, sin crash | e2e | ✓ |
@@ -80,6 +84,14 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 - Playwright: suite completa, **112/112** correctos tras actualizar una prueba obsoleta. El primer intento tuvo un timeout en H-H1 porque esperaba un resultado SPP del navegador; ahora el navegador bloquea correctamente esos cálculos. Se cambió a H-E1, que verifica el bloqueo y que no se crea una entrada falsa; el spec enfocado pasó **3/3** y la suite completa posterior pasó **112/112**.
 - Los veredictos antiguos se invalidan por versión; las puntuaciones solo se exponen si la estrategia sigue calificada para el mismo dataset.
 - El requisito estricto puede dejar el banco sin estrategias calificadas. La validación en ventana Tauri y con datos reales aún está pendiente; los tests no garantizan rentabilidad futura.
+
+## Revalidación del optimizador (2026-11-07)
+
+- `npm run build`: correcto.
+- Playwright: suite completa, **113/113** correctos.
+- Rust: **82/82** tests correctos, incluido el contrato separado de métricas para Simple y Walk-Forward.
+- F04-H1/H2 verifican el mapa con los valores adecuados por modo; F04-H3 comprueba la pantalla de detalle y la estrategia seleccionada.
+- La interfaz dejó de usar la superficie SVG isométrica y ahora explica el mapa tabular con valores, ejes, drawdown y leyendas. No se hizo una validación visual manual dentro de la ventana Tauri.
 
 ## Bugs encontrados y su estado
 

@@ -1561,14 +1561,27 @@ pub fn run_optimizer(state: State<AppState>, strategy_id: i64, param_a: String, 
     let db = state.db.lock();
     let core = load_core(&db, strategy_id)?;
     let g = ops::run_grid(&core, &EngineCfg::default(), steps as usize, &kind)?;
+    let names = core.template.param_names();
+    let param_a = if names[0] == "—" { param_a } else { names[0].to_string() };
+    let param_b = if names[1] == "—" { param_b } else { names[1].to_string() };
     // historial: la mejor combinacion de la rejilla
     let best = g["best"].clone();
-    let pf = best["pf"].as_f64().unwrap_or(0.0);
-    let verdict = if pf >= 1.15 { "pass" } else if pf >= 0.95 { "warn" } else { "fail" };
+    let score = if kind == "wf" {
+        best["wfe"].as_f64().unwrap_or(0.0)
+    } else {
+        best["pf"].as_f64().unwrap_or(0.0)
+    };
+    let (verdict, metrics) = if kind == "wf" {
+        let verdict = if score >= 50.0 { "pass" } else if score >= 35.0 { "warn" } else { "fail" };
+        (verdict, pick_metrics(&best, &["wfe", "maxDD", "a", "b"]))
+    } else {
+        let verdict = if score >= 1.15 { "pass" } else if score >= 0.95 { "warn" } else { "fail" };
+        (verdict, pick_metrics(&best, &["pf", "maxDD", "a", "b"]))
+    };
     record_run(
         &db, strategy_id, "optimizer", verdict,
         &format!("{} = {} · {} = {}", param_a, best["a"], param_b, best["b"]),
-        pick_metrics(&best, &["pf", "maxDD", "a", "b"]),
+        metrics,
         serde_json::json!({ "paramA": param_a, "paramB": param_b, "steps": steps, "kind": kind }),
         &serde_json::json!({ "aValues": g["aValues"], "bValues": g["bValues"], "best": best }),
     );
