@@ -196,8 +196,36 @@ en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe m�
 - Evidence: `e2e/f-phase3.spec.ts` F04-H1/H2/H3 y `src-tauri/src/engine/ops.rs` test `optimizer_devuelve_metricas_y_mejor_combinacion_segun_modo`.
 - Status: **fixed** — el mapa tabular presenta PF/DD en Simple y WFE/DD/veredicto en Walk-Forward; se valida el formato devuelto por el motor, se muestra un error explícito ante respuestas incompatibles y el título de la opción de detalle refleja el mapa actual.
 
+### BUG-018: la exportación de datasets confirmaba éxito sin indicar dónde se guardó
+
+- Severity: S2 (función de exportación inutilizable desde el flujo normal de escritorio).
+- Flow / case: Gestor de datos / B6.
+- Steps: elegir un dataset, pulsar **Exportar** y confirmar el formato.
+- Expected: aparece una ventana «Guardar como»; tras confirmar, el archivo queda en la ruta elegida y el mensaje muestra esa ruta. Cancelar no debe afirmar éxito.
+- Actual: se mostraba una confirmación, pero no aparecía diálogo ni era visible el archivo; el backend lo escribía silenciosamente en la carpeta interna de datos de la aplicación.
+- Evidence: resultado de prueba manual del usuario en `PRUEBAS_MANUALES.md` B6; inspección del command `export_dataset`; regresión browser en `e2e/f-phase4.spec.ts` S21-E1.
+- Status: **fix implemented; native manual retest pending** — se añade diálogo nativo de guardado, escritura a la ruta elegida, verificación del tamaño y error explícito fuera de Tauri. Prueba Rust cubre CSV/QFD y la ruta destino; Playwright comprueba que el navegador no anuncia una exportación ficticia.
+
+### BUG-019: el constructor no mostraba un resultado final ni razones completas de descarte
+
+- Severity: S2 (resultado de una generación sin estrategias no quedaba explicado).
+- Flow / case: F01 / C2.
+- Steps: iniciar una generación con objetivo de 10, filtros y robustez estricta cuando ningún candidato cumple todos los criterios.
+- Expected: estado final visible y un resumen que indique cuánto avanzó y los filtros/criterios que descartaron candidatos; debe seguir disponible al volver a abrir la generación.
+- Actual: el resumen era solo un evento efímero; el frontend no estaba suscrito al evento Tauri `build-event`, la pantalla no mostraba el resultado persistido y el motor reportaba solo el primer filtro base que fallaba.
+- Evidence: Playwright reprodujo que un build `done` con `0/10` y `resultSummary` no mostraba un resumen accesible; tests Rust verifican el desglose de criterios y la persistencia.
+- Status: **fixed** — se conecta el listener Tauri, se persiste el resumen final en SQLite (con migración idempotente), se muestra estado/resultado en S03 y el motor cuenta rechazos por cada filtro y cada criterio de robustez estricta. Ver `e2e/f-core.spec.ts`, `src-tauri/src/engine/genetic.rs` y `src-tauri/src/commands.rs`.
+
 ### Límite manual restante
 
 - No se automatizó el diálogo nativo de selección de fichero ni se usaron datos personales. La importación se verificó llamando al command Tauri real con un CSV sintético de 800 barras.
 - La importación del fichero concreto del usuario aún debe repetirse con esta versión; si sigue fallando, basta con compartir la fila de cabecera y una línea de ejemplo con valores sustituidos, no el histórico completo.
-- No hay S1/S2 abiertos identificados en el código verificado; BUG-014 espera confirmación del CSV concreto.
+- El usuario observó aproximadamente 17.000 filas descartadas de un CSV de unas 42.000 filas en tres símbolos. Todavía no se conoce el motivo ni se confirma que sean descartes correctos; se añade desglose por causa al informe para diagnosticarlo al reimportar. Hasta entonces, no dar esos históricos por validados. Se necesitan los contadores nuevos y, si no bastan, la cabecera y 2–3 filas anonimizadas.
+- BUG-018 requiere confirmar el diálogo nativo y el archivo en la ruta seleccionada en la aplicación de escritorio.
+
+### Por comprobar: filas descartadas en CSV del usuario
+
+- Pasos reportados: importar históricos de tres símbolos, cada uno de unas 42.000 filas.
+- Resultado inicial: aproximadamente 17.000 filas descartadas por fichero. En la importación posterior el programa reportó 42.698 barras, 17.388 huecos estimados (máximo 73), 0 filas descartadas, 0 barras sin volumen y 0 OHLC incoherente.
+- Actual: el importador acepta todas las filas; la cifra grande es el cómputo temporal entre timestamps. El algoritmo compara intervalos continuos y no conoce sesiones del símbolo, por lo que puede sumar noches, fines de semana y cierres planificados. No se puede concluir que las barras estén perdidas ni que todos los intervalos sean cierres normales sin saber timeframe, activo y calendario.
+- Acción: se cambió el informe para llamarlos «intervalos sin barras estimados» y advertir explícitamente que pueden incluir cierres de mercado. Para distinguir una laguna de datos real se necesita revisar timestamps y el calendario de negociación del activo.

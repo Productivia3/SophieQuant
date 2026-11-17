@@ -102,7 +102,44 @@ type BuildListener = (e: WorkstepEvent) => void
 const listeners = new Set<BuildListener>()
 export function onBuildEvent(fn: BuildListener): () => void {
   listeners.add(fn)
-  return () => listeners.delete(fn)
+  let active = true
+  let unlisten: (() => void) | undefined
+  if (isTauri()) {
+    void import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{
+        buildId: number
+        level: 'info' | 'warn' | 'error'
+        message: string
+        progress: number
+      }>('build-event', ({ payload }) => {
+        emit({
+          buildId: payload.buildId,
+          level: payload.level,
+          message: payload.message,
+          progress: payload.progress,
+          ts: Date.now(),
+        })
+      }))
+      .then(stop => {
+        if (active) unlisten = stop
+        else stop()
+      })
+      .catch(error => {
+        if (active) {
+          emit({
+            buildId: 0,
+            level: 'error',
+            message: `No se pudo conectar al registro del build: ${error instanceof Error ? error.message : String(error)}`,
+            ts: Date.now(),
+          })
+        }
+      })
+  }
+  return () => {
+    active = false
+    listeners.delete(fn)
+    unlisten?.()
+  }
 }
 function emit(e: WorkstepEvent) { listeners.forEach(l => l(e)) }
 
@@ -277,6 +314,9 @@ export const api = {
         }
         b.status = b.nPassed >= cfg.nTarget ? 'done' : 'done'
         b.finishedAt = Date.now()
+        b.resultSummary = b.nPassed >= cfg.nTarget
+          ? `Objetivo alcanzado: ${b.nPassed}/${cfg.nTarget} estrategias.`
+          : `No se alcanzó el objetivo de ${cfg.nTarget} estrategias: solo ${b.nPassed} superaron todos los criterios. En la aplicación de escritorio se muestra el desglose de filtros y robustez.`
         emit({ buildId: id, level: 'info', ts: Date.now(), message: `build completado — ${b.nPassed} estrategias pasaron los filtros`, progress: 1 })
       } catch (err) {
         b.status = 'error'
@@ -617,7 +657,7 @@ export const api = {
           'El tamano de posicion fue fijo (0.1 lotes) y el balance inicial 10000 USD: no hay gestion de capital dinamica.',
           'La version actual solo opera en largo (entra y sale), sin vender en corto.',
           'No se aplicaron horarios ni filtros de sesion: la regla actua en todas las barras.',
-          'Si el dataset tenia huecos, el backtest los relleno de forma continua.',
+          'El diagnostico de intervalos no conoce las sesiones del simbolo; compara el historico con el calendario de negociacion antes de concluir que faltan barras.',
         ],
         checklist: [
           'Carga el EA en MT5 con los valores por defecto que trae el archivo.',
@@ -626,7 +666,7 @@ export const api = {
           'Comprueba si tu broker cobra comision por lote y ajustala en el input del EA.',
           'Cuenta las operaciones: deben ser similares a las del backtest.',
           'Mira el informe del tester de MT5 y compara el equity linea a linea.',
-          'Si el dataset tenia huecos, el backtest es mas optimista que el real.',
+          'Las barras ausentes durante horas de negociacion pueden afectar las senales; los intervalos estimados tambien pueden corresponder a cierres normales del mercado.',
           'El backtest es en largo y de posicion fija: no anadas gestion de capital al EA.',
         ],
         plataforma: 'MetaTrader 4/5',
@@ -830,16 +870,27 @@ export const api = {
     return df
   },
 
-  async exportDataset(dataFileId: number, format: 'csv' | 'qfd'): Promise<{ fileName: string; bytes: number }> {
-    const r = await real<{ fileName: string; bytes: number }>('export_dataset', { dataFileId, format })
-    if (r) return r
-    await delay(500)
-    const df = db.dataFiles.find(d => d.id === dataFileId)
-    const sym = db.symbols.find(s => s.id === df?.symbolId)?.name ?? 'DATA'
-    return {
-      fileName: `${sym}_${df?.timeframe ?? 'm1'}.${format}`,
-      bytes: df?.compressedBytes ?? 0,
+  async exportDataset(
+    dataFileId: number,
+    format: 'csv' | 'qfd',
+    defaultFileName: string,
+  ): Promise<{ fileName: string; filePath: string; bytes: number } | null> {
+    if (!isTauri()) {
+      throw new Error('La exportación de datasets requiere la aplicación de escritorio.')
     }
+    const { save } = await import('@tauri-apps/plugin-dialog')
+    const destinationPath = await save({
+      defaultPath: defaultFileName,
+      filters: [{
+        name: format === 'csv' ? 'CSV' : 'Dataset QFD',
+        extensions: [format],
+      }],
+    })
+    if (!destinationPath) return null
+    const result = await realStrict<{ fileName: string; filePath: string; bytes: number }>(
+      'export_dataset', { dataFileId, format, destinationPath })
+    if (!result) throw new Error('El motor no devolvió la confirmación de la exportación.')
+    return result
   },
 
   /**
@@ -1411,6 +1462,15 @@ export interface ExportResult {
 export interface ImportQuality {
   nBars: number
   skipped: number
+  skippedReasons: {
+    malformedColumns: number
+    invalidTimestamp: number
+    invalidOpen: number
+    invalidHigh: number
+    invalidLow: number
+    invalidClose: number
+    incoherentOhlc: number
+  }
   dateFrom: number
   dateTo: number
   avisos: string[]

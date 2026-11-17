@@ -46,7 +46,7 @@ pub fn verification(tmpl: Template, p: [f64; 3], cfg: &EngineCfg) -> serde_json:
         ),
         "La version actual solo opera en largo (entra y sale), sin vender en corto.".to_string(),
         "No se aplicaron horarios ni filtros de sesion: la regla actua en todas las barras.".to_string(),
-        "Si el dataset tenia huecos, el backtest los relleno de forma continua: el EA vera esos periodos como tiempo real.".to_string(),
+        "El diagnostico de intervalos no conoce las sesiones del simbolo; compara el historico con el calendario de negociacion antes de concluir que faltan barras.".to_string(),
     ];
     let checklist = vec![
         "Carga el EA en MT5 con los valores por defecto que trae el archivo (no los cambies todavia).".to_string(),
@@ -55,7 +55,7 @@ pub fn verification(tmpl: Template, p: [f64; 3], cfg: &EngineCfg) -> serde_json:
         "Comprueba si tu broker cobra comision por lote: si la cobra, ajustala en el input del EA antes de comparar.".to_string(),
         "Cuenta las operaciones: deben ser similares a las del backtest. Si difieren mucho, la logica no esta bien portada.".to_string(),
         "Mira el informe del tester de MT5 (informe de operaciones) y compara el equity linea a linea con el del backtest.".to_string(),
-        "Si el dataset tenia huecos o volumetricos raros, el backtest es mas optimista que el real: tenlo en cuenta.".to_string(),
+        "Las barras ausentes durante horas de negociacion pueden afectar las senales; los intervalos estimados tambien pueden corresponder a cierres normales del mercado.".to_string(),
         "Recorda: el backtest es en largo y de posicion fija. Si en el EA anades gestion de capital, los numeros dejan de ser comparables.".to_string(),
     ];
     serde_json::json!({
@@ -315,5 +315,15 @@ mod tests {
         assert_ne!(a, b);
         assert_ne!(b, c);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn verification_no_afirma_que_los_intervalos_sean_datos_perdidos() {
+        let report = verification(Template::MaCross, [12.0, 48.0, 0.0], &EngineCfg::default());
+        let text = report.to_string();
+        assert!(text.contains("no conoce las sesiones del simbolo"));
+        assert!(text.contains("pueden corresponder a cierres normales"));
+        assert!(!text.contains("relleno de forma continua"));
+        assert!(!text.contains("mas optimista que el real"));
     }
 }

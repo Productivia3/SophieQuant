@@ -354,13 +354,13 @@ difieren.
 
 - **Al generar el EA**, la app muestra **qué se ha asumido** (barras y no ticks;
   el spread, slippage y comisión reales de la corrida; posición y balance fijos;
-  solo largo; sin horarios; huecos rellenados) y una **checklist de 8 puntos**
+  solo largo; sin horarios; limitación del diagnóstico de intervalos) y una **checklist de 8 puntos**
   para comprobarlo en MetaTrader. Los valores salen de la configuración real de
   la corrida, así que no son un texto genérico.
 - **Al importar un CSV**, el importador lo diagnostica: filas descartadas,
-  huecos (y el mayor), barras sin volumen, precios incoherentes y timestamps
-  repetidos. Un dataset con huecos es la causa típica de que el backtest sea más
-  optimista que el mercado real.
+  intervalos estimados sin barras, barras sin volumen, precios incoherentes y
+  timestamps repetidos. El conteo no conoce las sesiones del símbolo y no
+  demuestra por sí solo que falten datos durante horas de negociación.
 - Documento: `replica/export-verificacion.md`.
 
 Esto no cierra la paridad de motor tick —que es otro bloque, carísimo— pero

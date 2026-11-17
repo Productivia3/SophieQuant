@@ -146,9 +146,50 @@ test.describe('F01 generar estrategias', () => {
     // elegir un TF sin dataset (Cambiar TF a d1, el seed solo trae m1)
     await page.getByRole('button', { name: /^d1$/ }).click()
     await expect(page.getByText(/no hay datos históricos/i)).toBeVisible()
+    await expect(page.getByText('Plantilla y volumen')).toHaveCount(0)
+    await expect(page.getByText('Filtros por cualquier métrica')).toHaveCount(0)
+    await expect(page.getByText('Filtro de robustez estricta')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: /generar estrategias/i })).toBeDisabled()
+
+    await page.getByRole('button', { name: /^m1$/ }).click()
+    await expect(page.getByText('Plantilla y volumen')).toBeVisible()
+    await expect(page.getByText('Filtros por cualquier métrica')).toBeVisible()
+    await expect(page.getByRole('button', { name: /generar estrategias/i })).toBeEnabled()
+    await page.getByRole('button', { name: /^d1$/ }).click()
+
     // el enlace dentro del aviso funciona (no el de la sidebar)
     await page.locator('p').getByRole('link', { name: 'Datos' }).click()
     await expect(page.getByRole('heading', { name: /datos históricos/i })).toBeVisible()
+  })
+
+  test('F01-H2 muestra fechas del dataset exacto y convierte timestamps Rust en segundos', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, '__TAURI__', {
+        configurable: true,
+        value: {
+          core: {
+            invoke: async (command: string) => {
+              if (command === 'list_symbols') {
+                return [{ id: 1, name: 'EURUSD', assetClass: 'forex', tickSize: 0.00001, pipSize: 0.0001, commission: 0 }]
+              }
+              if (command === 'list_data_files') {
+                return [
+                  { id: 1, symbolId: 1, timeframe: 'm1', storageKind: 'imported_csv', compressedBytes: 2_000_000, nBars: 50_000, dateFrom: 1_672_531_200, dateTo: 1_704_067_200, status: 'ready', createdAt: 1 },
+                  { id: 2, symbolId: 1, timeframe: 'h1', storageKind: 'imported_csv', compressedBytes: 3_000_000, nBars: 10_000, dateFrom: 1_672_531_200, dateTo: 1_704_067_200, status: 'ready', createdAt: 1 },
+                ]
+              }
+              if (command === 'list_templates') return [{ id: 1, name: 'Base MA cross', source: 'built_in' }]
+              if (command === 'list_build_metrics') return { metrics: [], pesos: [] }
+              throw new Error(`Comando inesperado en prueba: ${command}`)
+            },
+          },
+        },
+      })
+    })
+    await page.goto('/#/build/new')
+    await page.getByRole('button', { name: /^h1$/ }).click()
+
+    await expect(page.getByText(/datos listos: 3 mb · 01 ene 2023 → 01 ene 2024/i)).toBeVisible()
   })
 
   test('F01-E2 doble clic en "Generar estrategias" no crashea', async ({ page }) => {
@@ -159,6 +200,66 @@ test.describe('F01 generar estrategias', () => {
     await btn.click({ timeout: 1200 }).catch(() => {})
     // debe terminar en la pantalla de run sin excepción React
     await expect(page.getByRole('heading', { name: /generación #\d+/i })).toBeVisible()
+  })
+
+  test('F01-H3 muestra resumen persistido al terminar sin alcanzar el objetivo', async ({ page }) => {
+    const resultSummary = [
+      'No se alcanzó el objetivo de 10 estrategias: solo 0 superaron todos los criterios.',
+      'Filtro Profit factor >= 1000000000: 480 candidatos descartados.',
+      'Robustez estricta: 0/0 candidatos superaron todas las pruebas.',
+    ].join('\n')
+    await page.addInitScript(summary => {
+      Object.defineProperty(window, '__TAURI__', {
+        configurable: true,
+        value: {
+          core: {
+            invoke: async (command: string) => {
+              if (command === 'list_builds') {
+                return [{ id: 77, kind: 'builder', status: 'done', nPassed: 0, nTotal: 10, startedAt: 1, finishedAt: 2, resultSummary: summary }]
+              }
+              if (command === 'list_symbols') return [{ id: 1, name: 'EURUSD', assetClass: 'forex', tickSize: 0.00001, pipSize: 0.0001, commission: 0 }]
+              if (command === 'list_data_files') {
+                return [{ id: 1, symbolId: 1, timeframe: 'm1', storageKind: 'local_qfd', compressedBytes: 1000, nBars: 500, dateFrom: 1, dateTo: 2, status: 'ready', createdAt: 1 }]
+              }
+              if (command === 'list_templates') return [{ id: 1, name: 'Base MA cross', source: 'built_in' }]
+              if (command === 'list_build_metrics') return { metrics: [], pesos: [] }
+              if (command === 'start_build') return 77
+              throw new Error(`Comando inesperado en prueba: ${command}`)
+            },
+          },
+        },
+      })
+      Object.defineProperty(window, '__TAURI_INTERNALS__', {
+        configurable: true,
+        value: {
+          transformCallback: (callback: (event: unknown) => void) => {
+            Object.assign(window, { __buildEventCallback: callback })
+            return 1
+          },
+          invoke: async (command: string) => {
+            if (command === 'plugin:event|listen') return 1
+            if (command === 'plugin:event|unlisten') return undefined
+            throw new Error(`Comando de evento inesperado en prueba: ${command}`)
+          },
+        },
+      })
+    }, resultSummary)
+
+    await page.goto('/#/build/new')
+    await page.getByRole('button', { name: /generar estrategias/i }).click()
+    await expect(page.getByRole('status')).toContainText('No se alcanzó el objetivo de 10 estrategias')
+    await expect(page.getByRole('status')).toContainText('Profit factor >= 1000000000: 480 candidatos descartados')
+    await expect(page.getByText('COMPLETADO')).toBeVisible()
+    await expect.poll(() => page.evaluate(() =>
+      typeof (window as unknown as { __buildEventCallback?: unknown }).__buildEventCallback,
+    )).toBe('function')
+    await page.evaluate(() => {
+      const callback = (window as unknown as { __buildEventCallback: (event: unknown) => void }).__buildEventCallback
+      callback({ event: 'build-event', id: 1, payload: {
+        buildId: 77, level: 'info', message: 'Evento del motor recibido', progress: 1,
+      } })
+    })
+    await expect(page.getByText(/Evento del motor recibido/)).toBeVisible()
   })
 
   test('F01-E4 objetivo y filtros clamp de rango', async ({ page }) => {

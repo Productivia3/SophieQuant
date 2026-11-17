@@ -145,6 +145,11 @@ En la tabla del Gestor de datos puedes elegir una temporalidad mayor y pulsar
 **Resamplear**. Esto agrupa barras existentes (por ejemplo, m1 en m5); no crea
 información nueva ni sirve para convertir barras grandes en pequeñas.
 
+Pulsa **Exportar** en la fila del dataset, elige dónde guardar el fichero en la
+ventana de Windows y espera la confirmación con la ruta completa. Si cancelas el
+diálogo, no se crea ningún archivo. Puedes elegir CSV para un formato legible o
+QFD para conservar el formato binario del dataset.
+
 ## 4. Generar estrategias
 
 1. Abre **Constructor**.

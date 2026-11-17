@@ -190,10 +190,12 @@ export function S02BuildConfig() {
   }, [])
 
   const tfList: Timeframe[] = ['m1', 'm5', 'm15', 'm30', 'h1', 'h4', 'd1']
-  const dataForSymbol = dataFiles.filter(d => d.symbolId === form.symbolId)
-  const hasData = dataForSymbol.some(d => d.timeframe === form.timeframe)
+  const dataForTimeframe = dataFiles.find(d =>
+    d.symbolId === form.symbolId && d.timeframe === form.timeframe && d.status === 'ready')
+  const hasData = dataForTimeframe != null
 
   async function start() {
+    if (!hasData || busy) return
     setBusy(true)
     setStartError(null)
     try {
@@ -214,7 +216,7 @@ export function S02BuildConfig() {
   return (
     <Page title="Constructor — nueva generación" icon={<Wand2 size={16} />}
       actions={
-        <Button variant="primary" loading={busy} onClick={start}>
+        <Button variant="primary" loading={busy} disabled={!hasData} onClick={start}>
           <Play size={14} aria-hidden /> Generar estrategias
         </Button>
       }>
@@ -244,7 +246,7 @@ export function S02BuildConfig() {
           </Row>
           {hasData ? (
             <p className="flex items-center gap-1 text-xs text-success">
-              <Info size={12} aria-hidden /> Datos listos: {fmtBytes(dataForSymbol[0].compressedBytes)} · {fmtDate(dataForSymbol[0].dateFrom)} → {fmtDate(dataForSymbol[0].dateTo)}
+              <Info size={12} aria-hidden /> Datos listos: {fmtBytes(dataForTimeframe.compressedBytes)} · {fmtDate(dataForTimeframe.dateFrom)} → {fmtDate(dataForTimeframe.dateTo)}
             </p>
           ) : (
             <p className="flex items-center gap-1 text-xs text-warning">
@@ -253,94 +255,98 @@ export function S02BuildConfig() {
           )}
         </Section>
 
-        <Section title="Plantilla y volumen">
-          <Row label="Plantilla base">
-            <select className={selectCls} value={form.templateId}
-              onChange={e => setForm({ ...form, templateId: +e.target.value })} aria-label="Plantilla">
-              {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </Row>
-          <Row label="Estrategias objetivo">
-            <input type="number" min={10} max={2000} className={inputCls} aria-label="Estrategias objetivo"
-              value={form.nTarget} onChange={e => setForm({ ...form, nTarget: Math.max(10, +e.target.value) })} />
-          </Row>
-        </Section>
-
-        <Section title="Filtros por cualquier métrica">
-          <div className="space-y-2">
-            {filters.map((f, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2">
-                <select className={selectCls} aria-label={`Métrica del filtro ${i + 1}`}
-                  value={f.metric}
-                  onChange={e => setFilters(filters.map((x, j) => j === i ? { ...x, metric: e.target.value } : x))}>
-                  {metricas.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+        {hasData && (
+          <>
+            <Section title="Plantilla y volumen">
+              <Row label="Plantilla base">
+                <select className={selectCls} value={form.templateId}
+                  onChange={e => setForm({ ...form, templateId: +e.target.value })} aria-label="Plantilla">
+                  {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
-                <select className={selectCls} aria-label={`Operador del filtro ${i + 1}`}
-                  value={f.op}
-                  onChange={e => setFilters(filters.map((x, j) => j === i ? { ...x, op: e.target.value as MetricFilter['op'] } : x))}>
-                  <option value=">=">&ge;</option>
-                  <option value="<=">&le;</option>
-                  <option value=">">&gt;</option>
-                  <option value="<">&lt;</option>
-                </select>
-                <input type="number" step={0.05} className={`${inputCls} w-28`}
-                  aria-label={`Valor del filtro ${i + 1}`} value={f.value}
-                  onChange={e => setFilters(filters.map((x, j) => j === i ? { ...x, value: +e.target.value } : x))} />
-                {filters.length > 1 && (
-                  <Button size="sm" variant="ghost" aria-label={`Quitar filtro ${i + 1}`}
-                    onClick={() => setFilters(filters.filter((_, j) => j !== i))}>&times;</Button>
-                )}
-              </div>
-            ))}
-            <Button size="sm" variant="secondary"
-              onClick={() => setFilters([...filters, { metric: 'sharpe', op: '>=', value: 0.5 }])}>
-              + filtro
-            </Button>
-          </div>
-          <p className="mt-2 text-xs text-muted">
-            Todas las métricas del motor se pueden filtrar. Si no pasa ninguna estrategia, el
-            registro del build dice qué filtro está bloqueando.
-          </p>
-        </Section>
+              </Row>
+              <Row label="Estrategias objetivo">
+                <input type="number" min={10} max={2000} className={inputCls} aria-label="Estrategias objetivo"
+                  value={form.nTarget} onChange={e => setForm({ ...form, nTarget: Math.max(10, +e.target.value) })} />
+              </Row>
+            </Section>
 
-        <Section title="Filtro de robustez estricta">
-          <Row label="Criterio">
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={form.porRobustez} aria-label="Exigir robustez estricta"
-                onChange={e => setForm({ ...form, porRobustez: e.target.checked })} />
-              <span>Exigir robustez estricta</span>
-            </label>
-          </Row>
-          <Row label="Operaciones mínimas">
-            <input type="number" min={1} className={`${inputCls} w-28`} aria-label="Operaciones mínimas"
-              value={form.minTrades} onChange={e => setForm({ ...form, minTrades: +e.target.value })} />
-          </Row>
-          <Row label="Monte Carlo integrado">
-            <input type="checkbox" checked={form.porRobustez || form.monteCarlo}
-              disabled={form.porRobustez} aria-label="Monte Carlo integrado"
-              onChange={e => setForm({ ...form, monteCarlo: e.target.checked })} />
-            {form.porRobustez && <span className="text-xs text-muted">obligatorio en modo estricto</span>}
-          </Row>
-          {form.porRobustez && pesos.length > 0 && (
-            <div className="mt-2 rounded-md border border-border bg-surface-raised p-2">
-              <p className="mb-1 text-xs font-semibold text-muted">
-                Solo se guardan las que pasan todos los criterios
-              </p>
-              <p className="mb-1 text-xs text-muted">
-                OOS ≥ 30 operaciones, WFE ≥ 50 %, Monte Carlo 6/6, todas las pruebas SPP en PASS
-                y meseta en cada parámetro activo. Si ninguna cumple, no se guarda ninguna.
-                El score solo ordena las calificadas.
-              </p>
-              <ul className="space-y-0.5">
-                {pesos.map(w => (
-                  <li key={w.key} className="text-xs text-muted">
-                    <span className="font-mono text-text">{Math.round(w.peso * 100)} %</span> · {w.desc}
-                  </li>
+            <Section title="Filtros por cualquier métrica">
+              <div className="space-y-2">
+                {filters.map((f, i) => (
+                  <div key={i} className="flex flex-wrap items-center gap-2">
+                    <select className={selectCls} aria-label={`Métrica del filtro ${i + 1}`}
+                      value={f.metric}
+                      onChange={e => setFilters(filters.map((x, j) => j === i ? { ...x, metric: e.target.value } : x))}>
+                      {metricas.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+                    </select>
+                    <select className={selectCls} aria-label={`Operador del filtro ${i + 1}`}
+                      value={f.op}
+                      onChange={e => setFilters(filters.map((x, j) => j === i ? { ...x, op: e.target.value as MetricFilter['op'] } : x))}>
+                      <option value=">=">&ge;</option>
+                      <option value="<=">&le;</option>
+                      <option value=">">&gt;</option>
+                      <option value="<">&lt;</option>
+                    </select>
+                    <input type="number" step={0.05} className={`${inputCls} w-28`}
+                      aria-label={`Valor del filtro ${i + 1}`} value={f.value}
+                      onChange={e => setFilters(filters.map((x, j) => j === i ? { ...x, value: +e.target.value } : x))} />
+                    {filters.length > 1 && (
+                      <Button size="sm" variant="ghost" aria-label={`Quitar filtro ${i + 1}`}
+                        onClick={() => setFilters(filters.filter((_, j) => j !== i))}>&times;</Button>
+                    )}
+                  </div>
                 ))}
-              </ul>
-            </div>
-          )}
-        </Section>
+                <Button size="sm" variant="secondary"
+                  onClick={() => setFilters([...filters, { metric: 'sharpe', op: '>=', value: 0.5 }])}>
+                  + filtro
+                </Button>
+              </div>
+              <p className="mt-2 text-xs text-muted">
+                Todas las métricas del motor se pueden filtrar. Si no pasa ninguna estrategia, el
+                registro del build dice qué filtro está bloqueando.
+              </p>
+            </Section>
+
+            <Section title="Filtro de robustez estricta">
+              <Row label="Criterio">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={form.porRobustez} aria-label="Exigir robustez estricta"
+                    onChange={e => setForm({ ...form, porRobustez: e.target.checked })} />
+                  <span>Exigir robustez estricta</span>
+                </label>
+              </Row>
+              <Row label="Operaciones mínimas">
+                <input type="number" min={1} className={`${inputCls} w-28`} aria-label="Operaciones mínimas"
+                  value={form.minTrades} onChange={e => setForm({ ...form, minTrades: +e.target.value })} />
+              </Row>
+              <Row label="Monte Carlo integrado">
+                <input type="checkbox" checked={form.porRobustez || form.monteCarlo}
+                  disabled={form.porRobustez} aria-label="Monte Carlo integrado"
+                  onChange={e => setForm({ ...form, monteCarlo: e.target.checked })} />
+                {form.porRobustez && <span className="text-xs text-muted">obligatorio en modo estricto</span>}
+              </Row>
+              {form.porRobustez && pesos.length > 0 && (
+                <div className="mt-2 rounded-md border border-border bg-surface-raised p-2">
+                  <p className="mb-1 text-xs font-semibold text-muted">
+                    Solo se guardan las que pasan todos los criterios
+                  </p>
+                  <p className="mb-1 text-xs text-muted">
+                    OOS ≥ 30 operaciones, WFE ≥ 50 %, Monte Carlo 6/6, todas las pruebas SPP en PASS
+                    y meseta en cada parámetro activo. Si ninguna cumple, no se guarda ninguna.
+                    El score solo ordena las calificadas.
+                  </p>
+                  <ul className="space-y-0.5">
+                    {pesos.map(w => (
+                      <li key={w.key} className="text-xs text-muted">
+                        <span className="font-mono text-text">{Math.round(w.peso * 100)} %</span> · {w.desc}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </Section>
+          </>
+        )}
       </form>
     </Page>
   )
@@ -366,7 +372,7 @@ export function S03BuildRun() {
 
   useEffect(() => {
     const off = onBuildEvent(e => {
-      if (e.buildId !== buildId) return
+      if (e.buildId !== buildId && e.buildId !== 0) return
       setLines(prev => [{ level: e.level, message: e.message, ts: e.ts }, ...prev].slice(0, 300))
       if (e.progress != null) setProgress(p => Math.max(p, e.progress!))
     })
@@ -374,6 +380,15 @@ export function S03BuildRun() {
   }, [buildId])
 
   const running = b?.status === 'running'
+  const finished = b != null && ['done', 'cancelled', 'error'].includes(b.status)
+  const statusLabel = b?.status === 'running' ? 'EN CURSO'
+    : b?.status === 'paused' ? 'PAUSADA'
+      : b?.status === 'done' ? 'COMPLETADO'
+        : b?.status === 'cancelled' ? 'CANCELADO'
+          : b?.status === 'error' ? 'ERROR' : 'PENDIENTE'
+  const summary = b?.resultSummary ?? (finished
+    ? `Generación ${statusLabel.toLowerCase()}. Pasaron ${b.nPassed} de ${b.nTotal} estrategias.`
+    : null)
 
   return (
     <Page title={`Generación #${buildId}`} icon={<Wand2 size={16} />}
@@ -393,14 +408,27 @@ export function S03BuildRun() {
       <div className="flex h-full flex-col">
         <div className="shrink-0 border-b border-border bg-surface p-4">
           <div className="mb-2 flex items-center gap-3">
-            <Progressbar value={progress} />
-            <Badge tone={running ? 'running' : b?.status === 'done' ? 'pass' : 'pending'} />
+            <Progressbar value={finished ? 1 : progress} />
+            <Badge
+              tone={running ? 'running' : b?.status === 'done' ? 'pass' : b?.status === 'error' ? 'fail' : 'pending'}
+              label={statusLabel}
+            />
           </div>
           <div className="flex gap-3 text-sm text-muted">
             <span>Pasadas: <b className="text-text">{b?.nPassed ?? 0}</b></span>
             <span>Objetivo: <b className="text-text">{b?.nTotal ?? '—'}</b></span>
           </div>
         </div>
+        {summary && (
+          <section
+            className={`shrink-0 border-b border-border p-3 text-sm ${b?.status === 'error' ? 'bg-danger/10 text-danger' : 'bg-surface-raised text-text'}`}
+            role={b?.status === 'error' ? 'alert' : 'status'}
+            aria-label="Resultado de la generación"
+          >
+            <h2 className="mb-1 font-semibold">Resumen de la generación</h2>
+            <p className="whitespace-pre-line">{summary}</p>
+          </section>
+        )}
         <div className="min-h-0 flex-1">
           <BuildLog lines={lines} running={running} className="h-full" />
         </div>

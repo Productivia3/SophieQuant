@@ -64,7 +64,7 @@ create table if not exists builds (
   config jsonb not null,
   status text not null default 'queued' check (status in ('queued','running','paused','done','error','cancelled')),
   n_passed integer not null default 0, n_total integer not null default 0,
-  started_at integer, finished_at integer,
+  started_at integer, finished_at integer, result_summary text,
   parent_build_id integer references builds(id) on delete cascade
 );
 

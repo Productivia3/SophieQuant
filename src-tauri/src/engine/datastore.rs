@@ -46,6 +46,7 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
         ("backtest_runs", "oos_frac", "real"),
         ("strategies", "robust_score", "real"),
         ("strategies", "robust_detail", "jsonb"),
+        ("builds", "result_summary", "text"),
         ("strategy_verdicts", "method_version", "integer not null default 0"),
     ] {
         ensure_column(conn, table, column, definition)?;
@@ -189,13 +190,15 @@ impl Qfn {
 pub struct ImportReport {
     pub n_bars: i64,
     pub skipped: i64,
+    pub skipped_reasons: ImportSkipReasons,
     pub date_from: i64,
     pub date_to: i64,
-    /// Diagnostico de calidad del fichero: huecos, timestamps raro, precios imposibles.
+    /// Diagnostico de calidad del fichero: intervalos estimados, timestamps y precios.
     pub avisos: Vec<String>,
-    /// Numero de huecos detectados (barras ausentes entre la primera y la ultima).
+    /// Intervalos sin barras estimados a partir del primer paso temporal observado.
+    /// No distingue las sesiones cerradas de las barras realmente ausentes.
     pub huecos: i64,
-    /// Mayor hueco consecutivo de barras.
+    /// Mayor intervalo consecutivo estimado sin barras.
     pub hueco_max: i64,
     /// Barras con volumen cero.
     pub sin_volumen: i64,
@@ -205,10 +208,23 @@ pub struct ImportReport {
     pub timestamps_repetidos: i64,
 }
 
+#[derive(Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSkipReasons {
+    pub malformed_columns: i64,
+    pub invalid_timestamp: i64,
+    pub invalid_open: i64,
+    pub invalid_high: i64,
+    pub invalid_low: i64,
+    pub invalid_close: i64,
+    pub incoherent_ohlc: i64,
+}
+
 pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
     let txt = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut bars: Vec<Bar> = Vec::with_capacity(100_000);
     let mut skipped = 0i64;
+    let mut skipped_reasons = ImportSkipReasons::default();
     let first_line = txt
         .lines()
         .map(str::trim)
@@ -226,28 +242,40 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
         if line.is_empty() || line.starts_with('#') { continue }
         if columns.header && first_line == Some(line) { continue }
         let parts = csv_fields(line, delimiter);
-        if parts.len() <= columns.max_index() { skipped += 1; continue }
+        if parts.len() <= columns.max_index() {
+            skipped += 1;
+            skipped_reasons.malformed_columns += 1;
+            continue;
+        }
 
         // timestamp roto = fila individual mala: se descarta, no aborta el import
         let timestamp = columns.timestamp(&parts);
         let time = match parse_time(&timestamp) {
             Ok(t) => t,
-            Err(_) => { skipped += 1; continue }
+            Err(_) => {
+                skipped += 1;
+                skipped_reasons.invalid_timestamp += 1;
+                continue;
+            }
         };
         let Some(open) = parse_csv_number(&parts[columns.open], decimal_comma) else {
             skipped += 1;
+            skipped_reasons.invalid_open += 1;
             continue;
         };
         let Some(high) = parse_csv_number(&parts[columns.high], decimal_comma) else {
             skipped += 1;
+            skipped_reasons.invalid_high += 1;
             continue;
         };
         let Some(low) = parse_csv_number(&parts[columns.low], decimal_comma) else {
             skipped += 1;
+            skipped_reasons.invalid_low += 1;
             continue;
         };
         let Some(close) = parse_csv_number(&parts[columns.close], decimal_comma) else {
             skipped += 1;
+            skipped_reasons.invalid_close += 1;
             continue;
         };
         let volume = columns
@@ -256,6 +284,7 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
             .unwrap_or(0.0);
         if !(high >= low && high >= open && high >= close && low <= open && low <= close) {
             skipped += 1;
+            skipped_reasons.incoherent_ohlc += 1;
             continue;
         }
         bars.push(Bar { time, open, high, low, close, volume });
@@ -275,7 +304,7 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
         ));
     }
     // ── diagnostico de calidad ───────────────────────────────────────
-    // Se comprueba el fichero *antes* de darlo por bueno: huecos, timestamps
+    // Se comprueba el fichero *antes* de darlo por bueno: intervalos estimados, timestamps
     // repetidos, volumen cero y precios incoherentes. No aborta la importacion
     // (los datos son utilizables) pero avisa de lo que puede explicar
     // diferencias entre el backtest y lo que ves en el broker.
@@ -316,7 +345,9 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
         avisos.push(format!("{precios_incoherentes} barras con precios incoherentes (close fuera de [low, high])"));
     }
     if hueco_max > 0 {
-        avisos.push(format!("huecos de datos: {huecos} barras ausentes (el mayor, {hueco_max} barras)"));
+        avisos.push(format!(
+            "intervalos sin barras estimados: {huecos} (el mayor, {hueco_max}); pueden incluir cierres de mercado"
+        ));
     }
     if sin_volumen > 0 {
         avisos.push(format!("{sin_volumen} barras sin volumen"));
@@ -328,6 +359,7 @@ pub fn import_csv(path: &Path) -> Result<(Vec<Bar>, ImportReport), String> {
     let report = ImportReport {
         n_bars: bars.len() as i64,
         skipped,
+        skipped_reasons,
         avisos,
         huecos,
         hueco_max,
@@ -480,7 +512,7 @@ fn parse_csv_number(value: &str, decimal_comma: bool) -> Option<f64> {
     } else {
         value.to_string()
     };
-    value.parse::<f64>().ok()
+    value.parse::<f64>().ok().filter(|n| n.is_finite())
 }
 
 fn parse_time(s: &str) -> Result<i64, String> {
@@ -560,6 +592,17 @@ mod tests {
                 valor real,
                 calculado_en integer not null default 0
             );
+            create table builds (
+                id integer primary key,
+                kind text not null,
+                config jsonb not null,
+                status text not null default 'queued',
+                n_passed integer not null default 0,
+                n_total integer not null default 0,
+                started_at integer,
+                finished_at integer,
+                parent_build_id integer
+            );
             insert into symbols (id, name, asset_class, tick_size, pip_size, commission)
             values (7, 'EURUSD', 'forex', 0.00001, 0.0001, 2.5);
             insert into strategy_verdicts (id, strategy_id, check_key, estado)
@@ -589,6 +632,12 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(method_version, 0, "los veredictos previos deben quedar obsoletos");
+        let has_result_summary: bool = conn.query_row(
+            "select exists(select 1 from pragma_table_info('builds') where name = 'result_summary')",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(has_result_summary, "la migración agrega el resumen final del build");
     }
 
     /// Los veredictos se guardan y se releen: es la cache que pinta la tarjeta.
@@ -767,6 +816,58 @@ Date;Time;Open;High;Low;Close;Tickvol;Vol;Spread
         let err = import_csv(&p).unwrap_err();
         std::fs::remove_file(&p).ok();
         assert!(err.contains("barras"), "el error menciona barras: {err}");
+    }
+
+    #[test]
+    fn import_reporta_el_motivo_de_cada_fila_descartada() {
+        let p = temp("skip_reasons.csv");
+        let csv = concat!(
+            "time,open,high,low,close,volume\n",
+            "1700000000,1,2,0,1.5,10\n",
+            "1700000060,1,2,0,1.5,10\n",
+            "too,few,columns\n",
+            "bad-time,1,2,0,1.5,10\n",
+            "1700000180,x,2,0,1.5,10\n",
+            "1700000240,1,x,0,1.5,10\n",
+            "1700000300,1,2,x,1.5,10\n",
+            "1700000360,1,2,0,x,10\n",
+            "1700000420,1,2,0,3,10\n",
+            "1700000480,NaN,2,0,1.5,10\n",
+        );
+        std::fs::write(&p, csv).unwrap();
+        let (bars, report) = import_csv(&p).unwrap();
+        std::fs::remove_file(&p).ok();
+        assert_eq!(bars.len(), 2);
+        assert_eq!(report.skipped, 8);
+        assert_eq!(report.skipped_reasons.malformed_columns, 1);
+        assert_eq!(report.skipped_reasons.invalid_timestamp, 1);
+        assert_eq!(report.skipped_reasons.invalid_open, 2);
+        assert_eq!(report.skipped_reasons.invalid_high, 1);
+        assert_eq!(report.skipped_reasons.invalid_low, 1);
+        assert_eq!(report.skipped_reasons.invalid_close, 1);
+        assert_eq!(report.skipped_reasons.incoherent_ohlc, 1);
+        let json = serde_json::to_value(report).unwrap();
+        assert_eq!(json["skippedReasons"]["invalidTimestamp"], 1);
+        assert_eq!(json["skippedReasons"]["incoherentOhlc"], 1);
+    }
+
+    #[test]
+    fn diagnostico_de_intervalos_no_afirma_que_sean_datos_perdidos() {
+        let p = temp("session_gap.csv");
+        let csv = concat!(
+            "time,open,high,low,close,volume\n",
+            "1700000000,1,2,0,1.5,10\n",
+            "1700000060,1,2,0,1.5,10\n",
+            "1700004440,1,2,0,1.5,10\n",
+        );
+        std::fs::write(&p, csv).unwrap();
+        let (_, report) = import_csv(&p).unwrap();
+        std::fs::remove_file(&p).ok();
+        assert_eq!(report.huecos, 72);
+        assert!(report.avisos.iter().any(|message| {
+            message.contains("intervalos sin barras estimados")
+                && message.contains("pueden incluir cierres de mercado")
+        }));
     }
 
     #[test]

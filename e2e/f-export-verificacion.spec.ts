@@ -6,6 +6,7 @@ test.beforeEach(async ({ page }) => {
   const errors: string[] = []
   page.on('console', msg => { if (msg.type() === 'error') errors.push(msg.text()) })
   page.on('pageerror', e => errors.push(String(e)))
+  page.on('response', res => { if (res.status() >= 500) errors.push(`${res.status()} en ${res.url()}`) })
   ;(page as unknown as { _qfErrors: string[] })._qfErrors = errors
 })
 
@@ -25,6 +26,7 @@ test.describe('Verificación del export', () => {
     await expect(page.getByText(/verificacion antes de fiarte del ea/i)).toBeVisible()
     await expect(page.getByText(/lo que el backtest ha asumido/i)).toBeVisible()
     await expect(page.getByText(/checklist en metatrader/i)).toBeVisible()
+    await expect(page.getByText(/diagnostico de intervalos no conoce las sesiones/i)).toBeVisible()
     // los supuestos clave estan
     const cuerpo = await page.locator('body').textContent()
     expect(cuerpo).toMatch(/BARRAS, no de ticks/)
@@ -43,4 +45,5 @@ test.describe('Verificación del export', () => {
     await expect(page.getByRole('button', { name: /guardar fichero/i })).toHaveCount(0)
     await expect(page.getByText(/copia el código y guárdalo como archivo/i)).toBeVisible()
   })
+
 })

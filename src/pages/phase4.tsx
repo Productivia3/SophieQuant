@@ -367,13 +367,22 @@ export function S21DataManager() {
     }
   }
 
-  async function onExport(id: number) {
+  async function onExport(df: DataFileRec) {
     setBusy(true); setNotice(null)
-    const r = await api.exportDataset(id, fmtSel)
-    setNotice(`Exportado a ${r.fileName} (${fmtNum(r.bytes, 0)} bytes).`)
-    setBusy(false)
+    try {
+      const fileName = `${symName(df.symbolId)}_${df.timeframe}.${fmtSel}`
+      const r = await api.exportDataset(df.id, fmtSel, fileName)
+      setNotice(r
+        ? `Exportado a ${r.filePath} (${fmtNum(r.bytes, 0)} bytes).`
+        : 'Exportación cancelada; no se guardó ningún archivo.')
+    } catch (e) {
+      setNotice(`No se pudo exportar: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
+  const noticeIsError = notice?.startsWith('No se pudo') ?? false
   const symName = (id: number) => symbols[id] ?? `#${id}`
   const kindLabel: Record<DataFileRec['storageKind'], string> = {
     local_qfd: 'QFD local', imported_csv: 'CSV importado', dukascopy: 'Dukascopy', yahoo: 'Yahoo',
@@ -417,8 +426,11 @@ export function S21DataManager() {
         aria-label="Fichero CSV a importar" onChange={onImportFile} data-testid="qdm-file" />
 
       {notice && (
-        <p className="mx-4 mb-2 rounded-md border border-success/40 bg-success/10 p-3 text-sm text-success"
-          role="status">{notice}</p>
+        <p className={`mx-4 mb-2 rounded-md border p-3 text-sm ${
+          noticeIsError
+            ? 'border-danger/40 bg-danger/10 text-danger'
+            : 'border-success/40 bg-success/10 text-success'
+        }`} role={noticeIsError ? 'alert' : 'status'}>{notice}</p>
       )}
 
       {calidad && (
@@ -426,7 +438,7 @@ export function S21DataManager() {
           <h2 className="mb-2 text-sm font-semibold text-muted">Calidad del fichero importado</h2>
           <div className="mb-2 flex flex-wrap gap-3 text-xs text-muted">
             <span><b className="text-text">{fmtNum(calidad.nBars, 0)}</b> barras</span>
-            <span><b className="text-text">{fmtNum(calidad.huecos, 0)}</b> huecos (mayor: {fmtNum(calidad.huecoMax, 0)})</span>
+            <span><b className="text-text">{fmtNum(calidad.huecos, 0)}</b> intervalos sin barras estimados (mayor: {fmtNum(calidad.huecoMax, 0)})</span>
             <span><b className="text-text">{fmtNum(calidad.skipped, 0)}</b> filas descartadas</span>
             <span><b className="text-text">{fmtNum(calidad.sinVolumen, 0)}</b> sin volumen</span>
             <span><b className="text-text">{fmtNum(calidad.preciosIncoherentes, 0)}</b> precios incoherentes</span>
@@ -434,9 +446,28 @@ export function S21DataManager() {
           <ul className="list-inside list-disc text-xs text-muted">
             {calidad.avisos.map((a, i) => <li key={i}>{a}</li>)}
           </ul>
+          {calidad.huecos > 0 && (
+            <p className="mt-2 text-xs text-muted">
+              La estimación no conoce las sesiones del símbolo y puede contar cierres de mercado. No confirma por sí sola que falten datos durante horas de negociación.
+            </p>
+          )}
+          {calidad.skipped > 0 && (
+            <p className="mt-2 text-xs text-muted">
+              Desglose de filas descartadas: columnas insuficientes {fmtNum(calidad.skippedReasons.malformedColumns, 0)};
+              fecha/hora inválida {fmtNum(calidad.skippedReasons.invalidTimestamp, 0)};
+              apertura no numérica {fmtNum(calidad.skippedReasons.invalidOpen, 0)};
+              máximo no numérico {fmtNum(calidad.skippedReasons.invalidHigh, 0)};
+              mínimo no numérico {fmtNum(calidad.skippedReasons.invalidLow, 0)};
+              cierre no numérico {fmtNum(calidad.skippedReasons.invalidClose, 0)};
+              OHLC incoherente {fmtNum(calidad.skippedReasons.incoherentOhlc, 0)}.
+            </p>
+          )}
           <p className="mt-2 text-xs text-muted">
-            Los huecos y el volumen cero hacen que el backtest sea mas optimista que el real:
-            tenlo en cuenta al comparar con el broker.
+            Estos intervalos se estiman comparando timestamps y no tienen en cuenta
+            horarios de negociación, cierres diarios, fines de semana o festivos.
+            Por eso no equivalen necesariamente a datos perdidos durante mercado abierto.
+            Revisa las fechas antes de concluir que faltan barras.
+            El volumen cero se informa por separado y puede reducir la precisión del backtest.
           </p>
         </section>
       )}
@@ -491,7 +522,7 @@ export function S21DataManager() {
                           </>
                         )}
                         <Button size="sm" variant="ghost" loading={busy}
-                          onClick={() => onExport(df.id)} aria-label={`Exportar ${symName(df.symbolId)} ${df.timeframe}`}>
+                          onClick={() => void onExport(df)} aria-label={`Exportar ${symName(df.symbolId)} ${df.timeframe}`}>
                           <FileDown size={13} aria-hidden /> Exportar
                         </Button>
                       </div>

@@ -99,6 +99,7 @@ export interface BuildRec {
   nTotal: number
   startedAt: number | null
   finishedAt: number | null
+  resultSummary?: string | null
   parentBuildId: number | null
 }
 

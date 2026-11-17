@@ -358,7 +358,7 @@
         "area": "data",
         "priority": "could",
         "clone": "yes",
-        "notes": "PROPIO: el importador comprueba el fichero (huecos, volumen cero, precios incoherentes, timestamps repetidos) y lo dice: es lo que explica que el backtest sea mas optimista que el broker"
+        "notes": "PROPIO: el importador estima intervalos sin barras y comprueba volumen, precios y timestamps; los intervalos pueden incluir cierres de mercado y no prueban por si solos que falten datos"
       },
       {
         "feature": "Custom Analysis: enlace con scripts de Python (contrato versionado)",

@@ -18,7 +18,8 @@ export function fmtNum(n: number | null | undefined, d = 2): string {
 
 export function fmtDate(ts: number | null | undefined): string {
   if (!ts) return '—'
-  return new Date(ts).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
+  const timestampMs = Math.abs(ts) < 100_000_000_000 ? ts * 1000 : ts
+  return new Date(timestampMs).toLocaleDateString('es-ES', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
 export function fmtBytes(b: number): string {

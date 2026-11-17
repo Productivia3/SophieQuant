@@ -53,14 +53,13 @@ test.describe('S19 resultados de cartera', () => {
 })
 
 test.describe('S21 Gestor de datos', () => {
-  test('S21-H1 lista datasets y exporta seleccionando formato', async ({ page }) => {
+  test('S21-E1 lista datasets y no simula exportación en navegador', async ({ page }) => {
     await page.goto('/#/data-manager')
     await expect(page.getByRole('table')).toBeVisible()
     await page.getByLabel('Formato').selectOption('qfd')
     await page.getByRole('button', { name: /exportar /i }).first().click()
-    await expect(page.getByText(/exportado a /i)).toBeVisible({ timeout: 10_000 })
-    const body = await page.locator('body').textContent()
-    expect(body).toMatch(/\.qfd/)
+    await expect(page.getByRole('alert')).toContainText(/requiere la aplicación de escritorio/i)
+    await expect(page.getByText(/exportado a /i)).toHaveCount(0)
   })
 
   test('S21-H2 importa un CSV real vía file picker', async ({ page }) => {

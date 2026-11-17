@@ -460,16 +460,29 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
     let app2 = app.clone();
     let total = config.n_target;
     std::thread::spawn(move || {
+        let reporter = TauriReporter { app: app2.clone(), build_id, db_path: db_path.clone() };
         let conn = match open_thread_db(&db_path) {
             Ok(c) => c,
             Err(e) => {
-                let _ = app2.emit("build-event", BuildEvent { build_id, level: "err", message: e.to_string(), passed: 0, total, progress: 0.0 });
+                let message = format!("No se pudo iniciar el motor del build: {e}");
+                if let Ok(db) = Connection::open(&db_path) {
+                    if let Err(update_error) = finish_build(&db, build_id, "error", 0, total, &message) {
+                        reporter.report(
+                            "err",
+                            &format!("{message}; tampoco se pudo persistir el error: {update_error}"),
+                            0,
+                            total,
+                            1.0,
+                        );
+                        return;
+                    }
+                }
+                reporter.report("err", &message, 0, total, 1.0);
                 return;
             }
         };
-        let reporter = TauriReporter { app: app2.clone(), build_id, db_path: db_path.clone() };
 
-        let results = genetic::build(&bars, &engine_cfg, &config, &reporter);
+        let outcome = genetic::build(&bars, &engine_cfg, &config, &reporter);
 
         // persistir estrategias pasadas
         let ins_strategy = |th: &Connection, s: &genetic::GenStrat| -> Result<i64, rusqlite::Error> {
@@ -496,7 +509,7 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
         };
 
         let mut passed_n = 0u32;
-        for s in &results {
+        for s in &outcome.strategies {
             if reporter.cancelled() { break }
             match ins_strategy(&conn, s).and_then(|sid| {
                 conn.execute(
@@ -537,15 +550,14 @@ pub fn start_build(app: AppHandle, state: State<AppState>, config: BuildConfig) 
             }
         }
         let final_status = if reporter.cancelled() { "cancelled" } else { "done" };
-        let final_message = if config.por_robustez && passed_n == 0 {
-            "build finalizado — 0 estrategias guardadas; revisa el registro para ver si bloquearon los filtros base o la robustez estricta".to_string()
-        } else {
-            format!("build finalizado — {passed_n} estrategias pasadas")
-        };
-        let _ = reporter.report("info", &final_message,
-            passed_n, total, 1.0);
-        let _ = conn.execute("update builds set status = ?1, finished_at = ?2 where id = ?3",
-            q![final_status, now_ts(), build_id]);
+        let final_message = format!(
+            "{}\nGuardadas: {passed_n} de {} estrategias.",
+            outcome.summary, config.n_target
+        );
+        if let Err(e) = finish_build(&conn, build_id, final_status, passed_n, total, &final_message) {
+            reporter.report("err", &format!("no se pudo guardar el resultado final del build: {e}"), passed_n, total, 1.0);
+        }
+        reporter.report("info", &final_message, passed_n, total, 1.0);
     });
 
     Ok(build_id)
@@ -570,17 +582,33 @@ fn persist_build_progress(
     Ok(())
 }
 
+fn finish_build(
+    db: &Connection,
+    build_id: i64,
+    status: &str,
+    passed: u32,
+    total: u32,
+    summary: &str,
+) -> rusqlite::Result<()> {
+    db.execute(
+        "update builds set status = ?1, n_passed = ?2, n_total = ?3, finished_at = ?4, result_summary = ?5 where id = ?6",
+        q![status, passed, total, now_ts(), summary, build_id],
+    )?;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_builds(state: State<AppState>) -> Result<Vec<serde_json::Value>, String> {
     let db = state.db.lock();
     let mut st = db.prepare(
-        "select id, kind, status, n_passed, n_total, started_at, finished_at from builds order by id desc").map_err(|e| e.to_string())?;
+        "select id, kind, status, n_passed, n_total, started_at, finished_at, result_summary from builds order by id desc").map_err(|e| e.to_string())?;
     let rows = st.query_map([], |r| {
         Ok(serde_json::json!({
             "id": r.get::<_, i64>(0)?, "kind": r.get::<_, String>(1)?,
             "status": r.get::<_, String>(2)?, "nPassed": r.get::<_, i64>(3)?,
             "nTotal": r.get::<_, i64>(4)?, "startedAt": r.get::<_, Option<i64>>(5)?,
             "finishedAt": r.get::<_, Option<i64>>(6)?,
+            "resultSummary": r.get::<_, Option<String>>(7)?,
         }))
     }).map_err(|e| e.to_string())?
     .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
@@ -2095,38 +2123,51 @@ pub fn get_strategy_chart(state: State<AppState>, strategy_id: i64) -> Result<se
 
 fn round2f(v: f64) -> f64 { (v * 10000.0).round() / 10000.0 }
 
+fn export_dataset_file(src: &std::path::Path, destination: &std::path::Path, format: &str) -> Result<i64, String> {
+    match format {
+        "csv" => {
+            use std::io::Write;
+            let bars = Qfn::read(src).map_err(|e| e.to_string())?;
+            let file = std::fs::File::create(destination).map_err(|e| e.to_string())?;
+            let mut writer = std::io::BufWriter::new(file);
+            writeln!(writer, "time,open,high,low,close,volume").map_err(|e| e.to_string())?;
+            for bar in &bars {
+                writeln!(writer, "{},{},{},{},{},{}", bar.time, bar.open, bar.high, bar.low, bar.close, bar.volume)
+                    .map_err(|e| e.to_string())?;
+            }
+            writer.flush().map_err(|e| e.to_string())?;
+        }
+        "qfd" => {
+            std::fs::copy(src, destination).map_err(|e| e.to_string())?;
+        }
+        _ => return Err(format!("formato de exportación no admitido: {format}")),
+    }
+    let bytes = std::fs::metadata(destination).map_err(|e| e.to_string())?.len();
+    i64::try_from(bytes).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
-pub fn export_dataset(app: AppHandle, state: State<AppState>, data_file_id: i64, format: String) -> Result<serde_json::Value, String> {
-    let (path, sym, tf): (String, String, String) = {
+pub fn export_dataset(state: State<AppState>, data_file_id: i64, format: String, destination_path: String) -> Result<serde_json::Value, String> {
+    let path: String = {
         let db = state.db.lock();
         db.query_row(
-            "select df.file_path, sy.name, df.timeframe from data_files df join symbols sy on sy.id = df.symbol_id where df.id = ?1",
+            "select df.file_path from data_files df where df.id = ?1",
             q![data_file_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| r.get(0),
         ).optional().map_err(|e| e.to_string())?
         .ok_or(format!("dataset {data_file_id} no encontrado"))?
     };
     let src = std::path::Path::new(&path);
-    let out_dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("exports");
-    std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
-    let name = if format == "csv" {
-        // regenerar CSV legible desde el QFN fuente
-        let bars = Qfn::read(src).map_err(|e| e.to_string())?;
-        let name = format!("{sym}_{tf}.csv");
-        let mut csv = String::with_capacity(bars.len() * 48);
-        csv.push_str("time,open,high,low,close,volume\n");
-        for b in &bars {
-            csv.push_str(&format!("{},{},{},{},{},{}\n", b.time, b.open, b.high, b.low, b.close, b.volume));
-        }
-        std::fs::write(out_dir.join(&name), csv).map_err(|e| e.to_string())?;
-        name
-    } else {
-        let name = format!("{sym}_{tf}.qfn");
-        std::fs::copy(src, out_dir.join(&name)).map_err(|e| e.to_string())?;
-        name
-    };
-    let bytes = std::fs::metadata(out_dir.join(&name)).map(|m| m.len() as i64).unwrap_or(0);
-    Ok(serde_json::json!({ "fileName": name, "bytes": bytes }))
+    let destination = std::path::Path::new(&destination_path);
+    let bytes = export_dataset_file(src, destination, &format)?;
+    let file_name = destination.file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("la ruta de destino no contiene un nombre de archivo válido")?;
+    Ok(serde_json::json!({
+        "fileName": file_name,
+        "filePath": destination_path,
+        "bytes": bytes,
+    }))
 }
 
 #[tauri::command(async)]
@@ -2162,6 +2203,32 @@ pub fn run_opt_profile(state: State<AppState>, strategy_id: i64) -> Result<serde
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_dataset_escribe_el_fichero_seleccionado_y_confirma_su_tamano() {
+        let dir = std::env::temp_dir().join(format!("qf_export_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("source.qfn");
+        let csv = dir.join("selected.csv");
+        let qfd = dir.join("selected.qfd");
+        let bars = vec![
+            Bar { time: 1_700_000_000, open: 1.1, high: 1.2, low: 1.0, close: 1.15, volume: 100.0 },
+            Bar { time: 1_700_000_060, open: 1.15, high: 1.25, low: 1.1, close: 1.2, volume: 120.0 },
+        ];
+        Qfn::write(&src, &bars).unwrap();
+
+        let csv_bytes = export_dataset_file(&src, &csv, "csv").unwrap();
+        let csv_text = std::fs::read_to_string(&csv).unwrap();
+        assert!(csv_text.starts_with("time,open,high,low,close,volume\n"));
+        assert!(csv_text.contains("1700000000,1.1,1.2,1,1.15,100"));
+        assert_eq!(csv_bytes as u64, std::fs::metadata(&csv).unwrap().len());
+
+        let qfd_bytes = export_dataset_file(&src, &qfd, "qfd").unwrap();
+        assert_eq!(Qfn::read(&qfd).unwrap().len(), bars.len());
+        assert_eq!(qfd_bytes as u64, std::fs::metadata(&qfd).unwrap().len());
+        assert!(export_dataset_file(&src, &dir.join("bad.bin"), "bin").is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn los_flags_wf_usan_trades_duracion_y_drawdown_reales() {
@@ -2241,6 +2308,37 @@ mod tests {
             )
             .unwrap();
         assert_eq!(progress, (7, 100));
+    }
+
+    #[test]
+    fn finalizar_build_persiste_estado_y_resumen_diagnostico() {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::engine::datastore::init_schema(&conn).unwrap();
+        conn.execute(
+            "insert into builds (kind, config, status, n_total) values ('builder', '{}', 'running', 10)",
+            [],
+        )
+        .unwrap();
+        let build_id = conn.last_insert_rowid();
+
+        finish_build(
+            &conn,
+            build_id,
+            "done",
+            0,
+            10,
+            "No se alcanzó el objetivo.\nFiltro Profit factor >= 1000000000: 480 candidatos descartados.",
+        )
+        .unwrap();
+
+        let (status, passed, total, summary): (String, i64, i64, Option<String>) = conn.query_row(
+            "select status, n_passed, n_total, result_summary from builds where id = ?1",
+            rusqlite::params![build_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).unwrap();
+        assert_eq!(status, "done");
+        assert_eq!((passed, total), (0, 10));
+        assert!(summary.unwrap().contains("480 candidatos descartados"));
     }
 
     /// La configuracion del motor sale de los metadatos del simbolo, no de los

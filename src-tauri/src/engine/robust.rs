@@ -129,7 +129,7 @@ pub fn filter_report(m: &Metrics, filters: &[MetricFilter]) -> Vec<Value> {
 // ── score de robustez ────────────────────────────────────────────────
 
 /// Componentes del score de robustez. Todos van de 0 a 100.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Robustness {
     /// Eficiencia walk-forward (cuánto se conserva fuera de muestra).
@@ -147,11 +147,17 @@ pub struct Robustness {
     /// true solo cuando todas las comprobaciones estrictas pasan.
     #[serde(default)]
     pub calificado: bool,
+    /// Comprobaciones estrictas que no superó la candidata.
+    #[serde(default)]
+    pub fallos: Vec<String>,
 }
 
 impl Default for Robustness {
     fn default() -> Self {
-        Self { wfe: 0.0, mc_survival: 0.0, spp: 0.0, perfil: 0.0, score: 0.0, avanzado: false, calificado: false }
+        Self {
+            wfe: 0.0, mc_survival: 0.0, spp: 0.0, perfil: 0.0,
+            score: 0.0, avanzado: false, calificado: false, fallos: vec![],
+        }
     }
 }
 
@@ -178,6 +184,7 @@ pub fn quick(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) ->
         score: round2(score),
         avanzado: false,
         calificado: false,
+        fallos: vec![],
     }
 }
 
@@ -245,7 +252,8 @@ pub fn full(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -> 
         }).unwrap_or(false)
     }).unwrap_or(false);
     let oos_trades = super::ops::wfe_oos_trade_count(bars, tmpl, params, cfg);
-    r.calificado = strictly_qualified(r.wfe, oos_trades, mc_pass, spp_pass, profile_pass);
+    r.fallos = qualification_failures(r.wfe, oos_trades, mc_pass, spp_pass, profile_pass);
+    r.calificado = r.fallos.is_empty();
 
     r.score = round2(0.35 * r.wfe.max(0.0).min(100.0)
         + 0.30 * r.mc_survival
@@ -264,11 +272,36 @@ fn profile_score(shape: &str) -> f64 {
 }
 
 fn strictly_qualified(wfe: f64, oos_trades: u32, mc_pass: bool, spp_pass: bool, profile_pass: bool) -> bool {
-    wfe >= super::verdicts::WFE_PASS
-        && oos_trades >= super::verdicts::MIN_OOS_TRADES
-        && mc_pass
-        && spp_pass
-        && profile_pass
+    qualification_failures(wfe, oos_trades, mc_pass, spp_pass, profile_pass).is_empty()
+}
+
+fn qualification_failures(
+    wfe: f64,
+    oos_trades: u32,
+    mc_pass: bool,
+    spp_pass: bool,
+    profile_pass: bool,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    if wfe < super::verdicts::WFE_PASS {
+        failures.push(format!("WFE inferior al {} %", super::verdicts::WFE_PASS));
+    }
+    if oos_trades < super::verdicts::MIN_OOS_TRADES {
+        failures.push(format!(
+            "menos de {} operaciones OOS",
+            super::verdicts::MIN_OOS_TRADES
+        ));
+    }
+    if !mc_pass {
+        failures.push("al menos una prueba Monte Carlo fallida".into());
+    }
+    if !spp_pass {
+        failures.push("al menos una prueba SPP no aprobada".into());
+    }
+    if !profile_pass {
+        failures.push("algún parámetro no alcanza forma meseta".into());
+    }
+    failures
 }
 
 /// Pesos del score avanzado (se muestran en la interfaz).
@@ -350,5 +383,16 @@ mod tests {
         assert!(!strictly_qualified(50.0, 30, false, true, true));
         assert!(!strictly_qualified(50.0, 30, true, false, true));
         assert!(!strictly_qualified(50.0, 30, true, true, false));
+    }
+
+    #[test]
+    fn explica_cada_criterio_de_robustez_estricta_fallido() {
+        let failures = qualification_failures(20.0, 4, false, false, false);
+        assert_eq!(failures.len(), 5);
+        assert!(failures.iter().any(|failure| failure.contains("WFE")));
+        assert!(failures.iter().any(|failure| failure.contains("operaciones OOS")));
+        assert!(failures.iter().any(|failure| failure.contains("Monte Carlo")));
+        assert!(failures.iter().any(|failure| failure.contains("SPP")));
+        assert!(failures.iter().any(|failure| failure.contains("meseta")));
     }
 }

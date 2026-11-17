@@ -25,7 +25,7 @@ y se da una lista para comprobarlo.
 | Posición **fija** y balance inicial fijo | No hay gestión de capital dinámica ni pirámide. El EA exportado tampoco la tiene. |
 | Solo **largo** (entrar y salir) | Sin posiciones cortas. |
 | Sin horarios ni filtros de sesión | La regla actúa en todas las barras. |
-| Los huecos del dataset se rellenan de forma continua | El backtest es más optimista que la realidad si el histórico tenía huecos. |
+| El diagnóstico de intervalos no conoce las sesiones del símbolo | Los intervalos estimados pueden incluir cierres normales; comprueba el calendario de negociación antes de concluir que faltan barras. |
 
 ## Checklist para comprobar el EA en MetaTrader
 
@@ -39,8 +39,10 @@ y se da una lista para comprobarlo.
    mucho, la lógica no está bien portada (eso sí sería un fallo del export).
 6. Mira el **informe del tester de MT5** y compara el equity línea a línea con el
    del backtest.
-7. Si el dataset tenía huecos o volúmenes raros, el backtest es más optimista
-   que el real: tenlo en cuenta antes de concluir nada.
+7. Compara los intervalos estimados con las sesiones del símbolo. Las barras
+   realmente ausentes durante horas de negociación pueden afectar las señales;
+   los cierres normales no son datos perdidos. El volumen cero también limita
+   la información disponible.
 8. Recuerda: el backtest es **en largo y de posición fija**. Si añades gestión de
    capital al EA, los números dejan de ser comparables.
 
@@ -73,11 +75,13 @@ Relacionado con lo anterior: el importador de CSV ahora **diagnostica el
 fichero** y lo dice (`engine/datastore.rs::import_csv`):
 
 - filas descartadas por estar mal formadas;
-- **huecos** de barras (y el mayor de ellos);
+- **intervalos sin barras estimados** (y el mayor de ellos; el cálculo no conoce
+  las sesiones del instrumento);
 - barras **sin volumen**;
 - precios **incoherentes** (close fuera de [low, high]);
 - **timestamps repetidos**.
 
-Un fichero con huecos o volumen cero hace que el backtest sea más optimista que
-el mercado real. Es exactamente el tipo de diferencia que, sin decirlo, se
-convierte en «el export no funciona».
+Un intervalo estimado no demuestra que falten datos: puede corresponder al
+cierre diario, al fin de semana o a un festivo. Una barra realmente ausente
+durante la negociación puede afectar el backtest; el informe no determina cuál
+de estos casos aplica sin el calendario del símbolo.

@@ -59,28 +59,29 @@ veredictos y otras funciones nativas pueden estar bloqueadas allí por diseño.
 
 | ID | Tarea | Resultado esperado | Estado / notas |
 |---|---|---|---|
-| A1 | Abrir la aplicación y recorrer las opciones del menú. | La ventana carga sin pantalla negra ni mensajes de error; cada módulo abre su pantalla y el menú indica cuál está seleccionado. | |
-| A2 | Minimizar/restaurar la ventana y cambiar entre varias pantallas. | La aplicación sigue respondiendo; los controles y textos no desaparecen ni quedan superpuestos. | |
-| A3 | Abrir una ruta inexistente, si se puede escribir o navegar a ella. | Aparece una pantalla propia de «Página no encontrada» y existe una forma clara de volver; no se cierra la aplicación. | |
+| A1 | Abrir la aplicación y recorrer las opciones del menú. | La ventana carga sin pantalla negra ni mensajes de error; cada módulo abre su pantalla y el menú indica cuál está seleccionado. | 10 |
+| A2 | Minimizar/restaurar la ventana y cambiar entre varias pantallas. | La aplicación sigue respondiendo; los controles y textos no desaparecen ni quedan superpuestos. | 10|
+| A3 | Abrir una ruta inexistente, si se puede escribir o navegar a ella. | Aparece una pantalla propia de «Página no encontrada» y existe una forma clara de volver; no se cierra la aplicación. |10 |
 
 ### B. Datos e históricos
 
 | ID | Tarea | Resultado esperado | Estado / notas |
 |---|---|---|---|
-| B1 | En **Gestor de datos**, importar el CSV preparado al símbolo y temporalidad correctos. | Se confirma la importación; el fichero figura como **LISTO**, con el símbolo, timeframe y una cantidad de barras coherente con el archivo. | |
-| B2 | Revisar el informe de calidad del fichero importado. | Se muestran las barras leídas y las filas descartadas; huecos, volumen ausente o precios incoherentes se informan sin ocultarlos. Una cantidad de filas descartadas cercana al total requiere detenerse y revisar el formato. | |
-| B3 | Importar otra copia de prueba con separador punto y coma o tabulador, si tienes un CSV así. | Se reconocen las columnas OHLC y la fecha; las filas válidas se importan. La prueba no debe reemplazar ni borrar el primer histórico. | |
-| B4 | En **Datos**, comprobar que aparecen el símbolo y el histórico recién importados. | El dataset se puede localizar por símbolo/timeframe y coincide con el estado del Gestor de datos. No aparece como listo si la importación falló. | |
-| B5 | En el Gestor, resamplear una copia de datos desde una temporalidad menor a otra mayor (por ejemplo m1 a m5). | Se crea la temporalidad mayor con menos barras y OHLC agregados; la fuente original permanece intacta. No se ofrece convertir de una temporalidad mayor a otra menor. | |
-| B6 | Exportar el dataset de prueba desde el Gestor de datos, si se ofrece esa acción. | Se descarga o guarda un fichero con el nombre/formato indicado y puede abrirse; el dataset original sigue apareciendo en la aplicación. | |
+| B1 | En **Gestor de datos**, importar el CSV preparado al símbolo y temporalidad correctos. | Se confirma la importación; el fichero figura como **LISTO**, con el símbolo, timeframe y una cantidad de barras coherente con el archivo. |10 |
+| B2 | Revisar el informe de calidad del fichero importado. | Se muestran las barras leídas, el desglose de filas descartadas, intervalos temporales sin registros, volumen ausente y precios incoherentes. Los intervalos pueden corresponder a cierres de mercado y no prueban por sí solos que falten datos. |10 |
+| B3 | Importar otra copia de prueba con separador punto y coma o tabulador, si tienes un CSV así. | Se reconocen las columnas OHLC y la fecha; las filas válidas se importan. La prueba no debe reemplazar ni borrar el primer histórico. |N/A |
+| B4 | En **Datos**, comprobar que aparecen el símbolo y el histórico recién importados. | El dataset se puede localizar por símbolo/timeframe y coincide con el estado del Gestor de datos. No aparece como listo si la importación falló. |10 |
+| B5 | En el Gestor, resamplear una copia de datos desde una temporalidad menor a otra mayor (por ejemplo m1 a m5). | Se crea la temporalidad mayor con menos barras y OHLC agregados; la fuente original permanece intacta. No se ofrece convertir de una temporalidad mayor a otra menor. |10 |
+| B6 | Pulsar **Exportar**, elegir carpeta y nombre en el diálogo de Windows; repetir con CSV y QFD si procede. | Se abre «Guardar como»; tras confirmar, el archivo existe en la ruta elegida, su tamaño es mayor que cero y el programa confirma esa ruta. Si se cancela, informa que no guardó nada. El dataset original permanece. |10 |
+| B7 | Tras actualizar la aplicación, volver a importar el CSV y revisar el mensaje de intervalos temporales. | El programa identifica esos valores como intervalos estimados, avisa que puede contar cierres de mercado y no los confunde con filas descartadas. Para validar lagunas reales, comparar timestamps con sesiones esperadas de ese símbolo/timeframe. | 10 |
 
 ### C. Constructor y Banco
 
 | ID | Tarea | Resultado esperado | Estado / notas |
 |---|---|---|---|
-| C1 | Abrir **Constructor**, elegir el símbolo y timeframe importados y revisar las plantillas. | Solo se ofrecen las plantillas disponibles; el timeframe con datos aparece seleccionable y no hay error de «sin datos» para esa combinación. | |
-| C2 | Ejecutar una generación de prueba pequeña con **Exigir robustez estricta** activado. | Se muestra estado/progreso y registro de actividad. Al terminar, el proceso indica cuántas candidatas pasaron o por qué se excluyeron. Cero resultados es válido si ninguna supera los filtros. | |
-| C3 | Si el proceso permite pausar, pausar y reanudar; después, iniciar otra generación de prueba y detenerla. | Pausar detiene temporalmente el avance; reanudar lo continúa; detener cancela y deja el estado final claro. No se duplica una generación por doble clic. | |
+| C1 | Abrir **Constructor** y alternar entre un timeframe con datos y otro sin datos para el símbolo elegido. | Con datos se muestran plantilla, volumen, filtros y robustez, y se puede iniciar la generación. Sin datos se conserva el aviso y el enlace a Datos, se ocultan esas opciones y se deshabilita Generar estrategias. |10 |
+| C2 | Ejecutar una generación de prueba con objetivo 10, filtros personalizados y **Exigir robustez estricta** activado; probar también un filtro deliberadamente exigente. | Se muestra estado y progreso durante la ejecución; al terminar se marca como completada y queda un resumen persistente con pasadas/objetivo, descartes por cada filtro, mínimo de operaciones y criterios estrictos de robustez fallidos. Los conteos por criterio pueden solaparse. Cero resultados es válido si ninguna supera las condiciones. | Incidencia reportada; corrección implementada y automatizada. Pendiente repetir en la aplicación de escritorio con EURUSD H1. |
+| C3 | Si el proceso permite pausar, pausar y reanudar; después, iniciar otra generación de prueba y detenerla. | Pausar detiene temporalmente el avance; reanudar lo continúa; detener cancela y deja el estado final claro. No se duplica una generación por doble clic. |10 |
 | C4 | Abrir el Banco tras una generación. | Se muestran las estrategias guardadas y sus métricas; las celdas vacías se identifican como no disponibles, no como valores ficticios. | |
 | C5 | Ordenar el Banco pulsando una columna dos veces. | El primer clic ordena ascendente y el segundo descendente; los valores de la columna y sus filas siguen correspondiéndose. | |
 | C6 | Seleccionar una estrategia y abrir su ficha. | La ficha muestra regla/parametría, métricas, curva de equity y tramo OOS cuando exista. No aparecen `undefined`, `NaN` o datos de otra estrategia. | |

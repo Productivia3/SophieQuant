@@ -12,8 +12,11 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | case | flow | type | steps | expected | auto | result |
 | --- | --- | --- | --- | --- | --- | --- |
 | F01-H1 | generar estrategias | happy | S01 → "Nuevo build" → plantilla/TF → "Correr build" → S03 → "Ver Bank" | S03 con progreso + bank visible | e2e | ✓ |
+| F01-H2 | generar estrategias | dataset EURUSD H1 | seleccionar H1 con datasets M1 y H1; comprobar las fechas mostradas | usa las fechas del dataset H1 y muestra fechas correctas desde timestamps Rust en segundos | e2e | ✓ |
+| F01-H3 | generar estrategias | objetivo no alcanzado | mock de generación completada con 0/10 y diagnóstico guardado | estado COMPLETADO, resumen visible y razones de descarte persistidas tras cargar la ejecución | e2e/Rust | ✓ |
+| F01-R3 | generar estrategias | rechazos y robustez | filtros deliberadamente imposibles y checks estrictos fallidos | desglose independiente por filtro, mínimo de operaciones y motivo de cada validación estricta; conteos solapados identificados | Rust | ✓ |
 | F01-T1 | generar estrategias | contrato Tauri | iniciar desde S02 con `invoke` | configuración enviada dentro de `config` | e2e | ✓ |
-| F01-E1 | generar estrategias | edge: TF sin dataset | elegir d1 (solo m1 en seed) | aviso "No hay datos históricos" + enlace a Datos navega | e2e | ✓ |
+| F01-E1 | generar estrategias | edge: TF sin dataset | alternar entre d1 sin datos y m1 con datos | sin datos: aviso y enlace visibles, controles de plantilla/filtros/robustez ocultos y generación deshabilitada; con datos vuelven a mostrarse | e2e | ✓ |
 | F01-E2 | generar estrategias | edge: doble clic en "Correr build" | doble submit rápido | sin crash, aterriza en S03 | e2e | ✓ |
 | F01-E3 | generar estrategias | edge: refresh mid-build | refrescar S03 mientras el build está activo/pausado | estado y número de pasadas recuperados desde SQLite | Tauri | ✓ (build 4: paused, 15/100 tras refresh; cancelado al acabar) |
 | F01-E4 | generar estrategias | edge: objetivo fuera de rango | nTarget=9 | input clampa a min 10, corre igual | e2e | ✓ |
@@ -42,6 +45,9 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | F09-H2 | data manager + constructor + banco + exportar | happy: SQLite/QFN real | importar CSV → build → refrescar → banco → export MT5 | dataset listo, build persistido, estrategias listadas y export disponible | Tauri | ✓ (CSV sintético limpio, 800 barras; 2 estrategias; import command real) |
 | F09-E3 | data manager | edge: dialectos CSV comunes | importar separado por `;`/tab, fecha/hora separadas y decimal europeo | OHLC parseado; fecha y volumen correctos | Rust | ✓ |
 | F09-E2 | data manager | edge: CSV con ruido/gaps | importer CSV | filas malas contabilizadas y saltadas | Rust | ✓ |
+| B6 | data manager | exportación de dataset | pulsar Exportar y confirmar una ruta con diálogo nativo | el archivo existe en la ubicación elegida; la UI confirma la ruta y el tamaño | Tauri | pendiente de repetir manualmente |
+| B7 | importador CSV | diagnóstico de rechazos | reimportar fichero y consultar desglose de causas | contadores por motivo suman el total descartado | Rust/e2e | ✓ (caso sintético); MT5 reportó 0 filas descartadas |
+| B8 | importador CSV | intervalos estimados vs sesiones | importar el CSV MT5 y revisar avisos | avisa que no conoce el calendario de sesiones y no los declara datos perdidos | Rust/manual | pendiente: confirmar símbolo y timeframe; cotejar intervalos con horario del mercado |
 | S23-H1 | ajustes | happy: metadatos de mercado | abrir S23 y consultar símbolos | muestra los campos reales editables | e2e | ✓ |
 | F10-H1 | retest | happy | S04 multi → S08 | resultados con veredicto | e2e | ✓ |
 | F11-H1 | analyzer | happy | S24 | resumen, MC de cartera y gestión de capital | e2e | ✓ |
@@ -92,6 +98,13 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 - Rust: **82/82** tests correctos, incluido el contrato separado de métricas para Simple y Walk-Forward.
 - F04-H1/H2 verifican el mapa con los valores adecuados por modo; F04-H3 comprueba la pantalla de detalle y la estrategia seleccionada.
 - La interfaz dejó de usar la superficie SVG isométrica y ahora explica el mapa tabular con valores, ejes, drawdown y leyendas. No se hizo una validación visual manual dentro de la ventana Tauri.
+
+## Seguimiento manual de datos y exportación (2026-11-09)
+
+- El usuario observó aproximadamente 17.000 filas descartadas de un CSV de unas 42.000 en tres símbolos; todavía no está verificado si son filas inválidas o un formato parcialmente incompatible.
+- `ImportReport` ahora expone desglose por columnas, fecha/hora, cada campo numérico y OHLC incoherente; una prueba Rust verifica los contadores y su serialización.
+- La exportación abre el diálogo nativo de guardado y escribe en la ruta elegida; el command Rust verifica CSV/QFD y tamaño. Falta repetir B6 en la aplicación Tauri; la prueba en navegador confirma que ya no informa falsamente que exportó.
+- Validación de código: `npm run build` correcto; `cargo check` correcto; Rust **84/84**; suite completa de Playwright **113/113**. `cargo build` no pudo reemplazar `sophiequant.exe` por acceso denegado (probablemente está abierto); no se cerró ningún proceso.
 
 ## Bugs encontrados y su estado
 
