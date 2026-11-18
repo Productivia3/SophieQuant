@@ -181,10 +181,10 @@ en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe m�
 - Severity: S2 (podía presentar como robusta una estrategia sin superar todos los controles).
 - Flow / case: F01 / robustez estricta; F05 / SPP; veredictos.
 - Steps: generar estrategias con el filtro de robustez activo; revisar las pruebas SPP, el perfil de parámetros y el score del banco.
-- Expected: solo calificar si la búsqueda usa IS, hay al menos 30 operaciones OOS, WFE ≥50%, todas las pruebas MC y SPP pasan y cada parámetro activo presenta una meseta; advertencias, pendientes y evidencia de otro dataset no califican.
-- Actual: el score podía actuar como ordenación en vez de requisito; algunas pruebas SPP no medían degradación real y ciertos estados no aprobados podían contarse como PASS. El navegador también podía mostrar resultados calculados de forma simulada y conservar veredictos antiguos.
+- Expected: solo calificar si la búsqueda usa IS, hay al menos 30 operaciones OOS, WFE ≥50%, todas las pruebas MC, la perturbación de parámetros SPP y cada meseta de parámetros pasan; las señales invertidas/aleatorias son controles negativos diagnósticos, no condiciones para conservar la rentabilidad.
+- Actual: además de los problemas iniciales, la calificación SPP exigía que entradas/salidas invertidas, señales opuestas y entradas aleatorias conservaran el beneficio de la estrategia, lo cual descartaba estrategias por fallar controles negativos. El resumen agregado tampoco mostraba qué pruebas MC o parámetros fallaban.
 - Evidence: cobertura Rust en `src-tauri/src/engine/robust.rs`, `ops.rs`, `verdicts.rs` y `genetic.rs`; pruebas e2e en `e2e/f-filters.spec.ts`, `e2e/f-phase3.spec.ts`, `e2e/f-verdicts.spec.ts` y `e2e/f-historial.spec.ts`.
-- Status: **fixed with strict, fail-closed qualification** — se excluyen candidatos que no pasen cada requisito; las advertencias/pendientes no califican; los resultados web simulados están bloqueados; los cachés de versión anterior y los scores de otro dataset no se sirven. La calificación reduce falsos positivos, pero no demuestra rentabilidad futura. Falta validar en la ventana Tauri con un dataset real.
+- Status: **fix implemented; native retest pending** — la calificación fail-closed exige WFE/OOS, todas las pruebas MC, perturbación de parámetros SPP y meseta en cada parámetro; los controles negativos SPP ya no bloquean la calificación ni reducen su score. Se detallan en el resumen los tests MC y parámetros fallidos. Los resultados web simulados siguen bloqueados y los cachés obsoletos no se sirven. Rust focalizado pasó 10/10; falta validar en la ventana Tauri con EURUSD H1. Esto reduce falsos descartes conceptuales sin relajar MC ni la meseta, y no demuestra rentabilidad futura.
 
 ### BUG-017: el optimizador mostraba un gráfico confuso y resultados Walk-Forward indefinidos
 
@@ -215,6 +215,16 @@ en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe m�
 - Actual: el resumen era solo un evento efímero; el frontend no estaba suscrito al evento Tauri `build-event`, la pantalla no mostraba el resultado persistido y el motor reportaba solo el primer filtro base que fallaba.
 - Evidence: Playwright reprodujo que un build `done` con `0/10` y `resultSummary` no mostraba un resumen accesible; tests Rust verifican el desglose de criterios y la persistencia.
 - Status: **fixed** — se conecta el listener Tauri, se persiste el resumen final en SQLite (con migración idempotente), se muestra estado/resultado en S03 y el motor cuenta rechazos por cada filtro y cada criterio de robustez estricta. Ver `e2e/f-core.spec.ts`, `src-tauri/src/engine/genetic.rs` y `src-tauri/src/commands.rs`.
+
+### BUG-020: la búsqueda genética exploraba mal los parámetros con plantilla fija y sin supervivientes
+
+- Severity: S2 (podía consumir el presupuesto de búsqueda sin acercarse adaptativamente a los umbrales).
+- Flow / case: F01 / C2.
+- Steps: configurar objetivo 10 y filtros base; el usuario reporta 4.008 candidatos evaluados, 0 pasados, y 4.008 fallos de Profit Factor, además de filtros Recovery Factor y mínimo de operaciones.
+- Expected: conservar los filtros estrictos, explorar a partir de las mejores candidatas no calificadas y mostrar la distancia alcanzada frente a los umbrales.
+- Actual: al no haber supervivientes `passed`, el generador mutaba solo los parámetros por defecto y descartaba las candidatas más prometedoras. Además, con una plantilla fija asociaba algunas generaciones de esa plantilla a parámetros por defecto de otra plantilla.
+- Evidence: el resumen de búsqueda y el flujo de `current_gen` en `src-tauri/src/engine/genetic.rs`; tests nuevos verifican elites, uso como padres y coherencia plantilla/parámetros. La inspección local de `builds.config` identificó que el resultado 24/24 fue USDJPY H1 + Cruce de medias, mientras que el posterior 0/4008 fue EURUSD H1 + Reversión osciladora; difieren símbolo, plantilla y filtros. El segundo se ejecutó con el binario compilado después del cambio, por lo que no es prueba de una regresión con configuración equivalente.
+- Status: **fix implemented; equivalent-config retest pending** — se conserva un archivo de hasta 24 mejores candidatas según criterios y proximidad normalizada, se mutan entre generaciones manteniendo exploración desde parámetros por defecto, y la plantilla fija usa sus propios parámetros. El resumen añade mejores métricas observadas. Para validar el cambio y el ajuste SPP, falta repetir el build 4 con idénticos símbolo, timeframe, plantilla y filtros; no se garantiza que EURUSD H1 + Reversión osciladora produzca estrategias que cumplan.
 
 ### Límite manual restante
 

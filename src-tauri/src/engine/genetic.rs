@@ -52,6 +52,7 @@ impl Default for BuildConfig {
     }
 }
 
+#[derive(Clone)]
 pub struct GenStrat {
     pub tmpl: Template,
     pub params: [f64; 3],
@@ -64,6 +65,68 @@ pub struct GenStrat {
 pub struct BuildOutcome {
     pub strategies: Vec<GenStrat>,
     pub summary: String,
+}
+
+fn base_filter_rank(candidate: &GenStrat, bcfg: &BuildConfig) -> (usize, f64, f64) {
+    let metrics = &candidate.result.metrics;
+    let min_trades = if bcfg.min_trades == 0 {
+        1.0
+    } else {
+        (metrics.n_trades as f64 / bcfg.min_trades as f64).min(1.0)
+    };
+    let mut passed = usize::from(metrics.n_trades >= bcfg.min_trades);
+    let mut proximity = min_trades;
+
+    for filter in &bcfg.filters {
+        let value = robust::metric_value(metrics, &filter.metric).unwrap_or(f64::NEG_INFINITY);
+        let ok = match filter.op.as_str() {
+            ">=" => value >= filter.value,
+            "<=" => value <= filter.value,
+            ">" => value > filter.value,
+            "<" => value < filter.value,
+            _ => false,
+        };
+        if ok {
+            passed += 1;
+            proximity += 1.0;
+        } else if value.is_finite() {
+            let scale = value.abs().max(filter.value.abs()).max(1.0);
+            let shortfall = match filter.op.as_str() {
+                ">=" | ">" => (filter.value - value).max(0.0),
+                "<=" | "<" => (value - filter.value).max(0.0),
+                _ => scale,
+            };
+            proximity += (1.0 - shortfall / scale).clamp(0.0, 0.999);
+        }
+    }
+
+    (passed, proximity, metrics.profit_factor)
+}
+
+fn next_generation(
+    generation: usize,
+    template_id: i64,
+    passed: &[GenStrat],
+    elites: &[GenStrat],
+) -> Vec<(Template, [f64; 3])> {
+    let templates = [Template::MaCross, Template::RsiReversion, Template::AtrBreakout];
+    (0..24)
+        .map(|i| {
+            let base = if !passed.is_empty() && i % 2 == 1 {
+                let candidate = &passed[i % passed.len()];
+                (candidate.tmpl, candidate.params)
+            } else if passed.is_empty() && !elites.is_empty() && i % 2 == 1 {
+                let candidate = &elites[(generation + i) % elites.len()];
+                (candidate.tmpl, candidate.params)
+            } else if template_id > 0 {
+                let template = Template::from_id(template_id).unwrap_or(templates[i % 3]);
+                (template, template.default_params())
+            } else {
+                (templates[i % 3], templates[i % 3].default_params())
+            };
+            (base.0, mutate(base.1, 0.18, generation as u64 * 97 + i as u64))
+        })
+        .collect()
 }
 
 /// Genera `n_target` estrategias que pasan los filtros, con un presupuesto máximo de iteraciones.
@@ -110,6 +173,10 @@ pub fn build(
     let rechazos_min_trades = std::sync::atomic::AtomicU32::new(0);
     let mut candidatos_evaluados = 0u32;
     let mut pasaron_filtros = 0u32;
+    let mut elites: Vec<GenStrat> = Vec::new();
+    let mut mejor_profit_factor = 0.0f64;
+    let mut mejor_recovery_factor = f64::NEG_INFINITY;
+    let mut max_operaciones = 0u32;
 
     for gen in 0.. {
         if passed.len() >= n_target as usize || iterations_left <= 0 || reporter.cancelled() { break }
@@ -118,9 +185,9 @@ pub fn build(
             std::thread::sleep(std::time::Duration::from_millis(150));
         }
 
-        let batch: Vec<GenStrat> = current_gen
+        let evaluated: Vec<GenStrat> = current_gen
             .par_iter()
-            .filter_map(|(t, p)| {
+            .map(|(t, p)| {
                 let r = backtest::run(search_bars, *t, *p, cfg);
                 let filter_results = robust::filter_report(&r.metrics, &bcfg.filters);
                 for (idx, result) in filter_results.iter().enumerate() {
@@ -132,22 +199,39 @@ pub fn build(
                 if !enough_trades {
                     rechazos_min_trades.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
-                if enough_trades && filter_results.iter().all(|result| result["ok"] == true) {
-                    Some(GenStrat {
-                        tmpl: *t,
-                        params: *p,
-                        name: format!("{} {}", t.label(), gen_label(*t, p)),
-                        result: r,
-                        robust: Robustness::default(),
-                    })
-                } else {
-                    None
+                GenStrat {
+                    tmpl: *t,
+                    params: *p,
+                    name: format!("{} {}", t.label(), gen_label(*t, p)),
+                    result: r,
+                    robust: Robustness::default(),
                 }
             })
             .collect();
 
         candidatos_evaluados += current_gen.len() as u32;
+        for candidate in &evaluated {
+            mejor_profit_factor = mejor_profit_factor.max(candidate.result.metrics.profit_factor);
+            mejor_recovery_factor = mejor_recovery_factor.max(candidate.result.metrics.rdd);
+            max_operaciones = max_operaciones.max(candidate.result.metrics.n_trades);
+        }
+        let batch: Vec<GenStrat> = evaluated.iter()
+            .filter(|candidate| {
+                robust::passes(&candidate.result.metrics, &bcfg.filters, bcfg.min_trades)
+            })
+            .cloned()
+            .collect();
         pasaron_filtros += batch.len() as u32;
+        elites.extend(evaluated);
+        elites.sort_by(|a, b| {
+            let (a_passed, a_proximity, a_pf) = base_filter_rank(a, bcfg);
+            let (b_passed, b_proximity, b_pf) = base_filter_rank(b, bcfg);
+            b_passed.cmp(&a_passed)
+                .then_with(|| b_proximity.partial_cmp(&a_proximity).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| b_pf.partial_cmp(&a_pf).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        elites.dedup_by(|a, b| a.tmpl == b.tmpl && a.params == b.params);
+        elites.truncate(24);
         iterations_left -= current_gen.len() as i64;
         passed.extend(batch.into_iter()
             .take(n_target as usize - passed.len().min(n_target as usize)));
@@ -166,19 +250,7 @@ pub fn build(
 
         // nueva generación: mutación de TODOS los seeds (ya que no mutamos sobre los pasados
         // hasta tener variedad); intercalamos mutaciones de los survivors para converger
-        current_gen = (0..24)
-            .map(|i| {
-                let base = if !passed.is_empty() && i % 2 == 1 {
-                    let pp = &passed[i % passed.len()];
-                    (pp.tmpl, pp.params)
-                } else if bcfg.template_id > 0 {
-                    (Template::from_id(bcfg.template_id).unwrap_or(templates[i % 3]), templates[i % 3].default_params())
-                } else {
-                    (templates[i % 3], templates[i % 3].default_params())
-                };
-                (base.0, mutate(base.1, 0.18, gen as u64 * 97 + i as u64))
-            })
-            .collect();
+        current_gen = next_generation(gen as usize, bcfg.template_id, &passed, &elites);
     }
 
     // ── seleccion ──────────────────────────────────────────────────────
@@ -246,6 +318,14 @@ pub fn build(
     let mut summary = vec![format!(
         "Evaluación base: {candidatos_evaluados} candidatos; {pasaron_filtros} superaron todos los filtros y el mínimo de operaciones."
     )];
+    if candidatos_evaluados > 0 {
+        summary.push(format!(
+            "Mejores métricas observadas en entrenamiento: Profit factor {}, Recovery factor {}, máximo {} operaciones.",
+            (mejor_profit_factor * 100.0).round() / 100.0,
+            ((if mejor_recovery_factor.is_finite() { mejor_recovery_factor } else { 0.0 }) * 100.0).round() / 100.0,
+            max_operaciones
+        ));
+    }
     if rechazos_min_trades.load(std::sync::atomic::Ordering::Relaxed) > 0
         || rechazos.iter().any(|count| count.load(std::sync::atomic::Ordering::Relaxed) > 0)
     {
@@ -326,6 +406,7 @@ fn rnd(state: &mut u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::types::Metrics;
 
     /// Serie sintética con cruces (igual que la de backtest; aquí duplicada
     /// porque los mod test no se ven entre sí).
@@ -438,7 +519,58 @@ mod tests {
         assert!(outcome.summary.contains("Filtro Profit factor >= 1000000000"));
         assert!(outcome.summary.contains("Filtro Drawdown máximo (%) <= -1"));
         assert!(outcome.summary.contains("pueden solaparse"));
+        assert!(outcome.summary.contains("Mejores métricas observadas en entrenamiento:"));
         assert!(outcome.summary.contains("No se alcanzó el objetivo de 10 estrategias"));
+    }
+
+    #[test]
+    fn la_busqueda_sigue_explorando_desde_las_mejores_candidatas_no_calificadas() {
+        let elite = GenStrat {
+            tmpl: Template::MaCross,
+            params: [8.0, 22.0, 0.0],
+            name: "elite".into(),
+            result: BacktestOutput {
+                metrics: Metrics { profit_factor: 1.15, n_trades: 250, ..Default::default() },
+                ..Default::default()
+            },
+            robust: Robustness::default(),
+        };
+        let bcfg = BuildConfig {
+            min_trades: 300,
+            filters: vec![MetricFilter::new("profitFactor", ">=", 1.2)],
+            ..Default::default()
+        };
+
+        assert!(base_filter_rank(&elite, &bcfg).0 < 2);
+        let next = next_generation(0, 1, &[], &[elite]);
+
+        assert_eq!(next[1], (Template::MaCross, mutate([8.0, 22.0, 0.0], 0.18, 1)));
+        assert_eq!(next[0], (Template::MaCross, mutate(Template::MaCross.default_params(), 0.18, 0)));
+        assert_eq!(next[2], (Template::MaCross, mutate(Template::MaCross.default_params(), 0.18, 2)));
+    }
+
+    #[test]
+    fn las_elites_priorizan_candidatos_mas_cercanos_a_los_filtros() {
+        let candidate = |profit_factor| GenStrat {
+            tmpl: Template::MaCross,
+            params: [10.0, 30.0, 0.0],
+            name: "candidate".into(),
+            result: BacktestOutput {
+                metrics: Metrics { profit_factor, n_trades: 300, ..Default::default() },
+                ..Default::default()
+            },
+            robust: Robustness::default(),
+        };
+        let bcfg = BuildConfig {
+            min_trades: 300,
+            filters: vec![MetricFilter::new("profitFactor", ">=", 1.2)],
+            ..Default::default()
+        };
+        let near = base_filter_rank(&candidate(1.1), &bcfg);
+        let far = base_filter_rank(&candidate(0.5), &bcfg);
+
+        assert!(near.0 == far.0);
+        assert!(near.1 > far.1);
     }
 
     #[test]

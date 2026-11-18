@@ -200,22 +200,11 @@ pub fn full(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -> 
         bars: bars.to_vec(),
     };
     let spp_result = super::ops::spp(&core, cfg);
-    r.spp = match &spp_result {
-        Ok(v) => {
-            let results = v["results"].as_array().cloned().unwrap_or_default();
-            let peor = results
-                .iter()
-                .filter_map(|x| x["verdict"].as_str())
-                .map(|s| match s {
-                    "pass" => 100.0,
-                    "warn" => 50.0,
-                    _ => 0.0,
-                })
-                .fold(100.0_f64, f64::min);
-            peor
-        }
-        Err(_) => 0.0,
-    };
+    r.spp = spp_result.as_ref()
+        .ok()
+        .and_then(|v| spp_parameter_result(v))
+        .map(|result| verdict_score(result["verdict"].as_str().unwrap_or("fail")))
+        .unwrap_or(0.0);
     let train_cut = (bars.len() * 6 / 10).max(60).min(bars.len());
     let profile_core = super::ops::StrategyCore {
         id: core.id,
@@ -234,18 +223,9 @@ pub fn full(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -> 
     };
 
     let tests: Vec<String> = super::verdicts::MC_TESTS.iter().map(|test| test.to_string()).collect();
-    let mc_pass = super::ops::mc_suite(&core, cfg, &tests, 60)
-        .ok()
-        .and_then(|v| v["results"].as_array().cloned())
-        .map(|results| {
-            results.len() == tests.len() && results.iter().all(|result| result["passed"] == true)
-        })
-        .unwrap_or(false);
-    let spp_pass = spp_result.as_ref().map(|v| {
-        v["results"].as_array().map(|results| {
-            !results.is_empty() && results.iter().all(|result| result["verdict"] == "pass")
-        }).unwrap_or(false)
-    }).unwrap_or(false);
+    let mc_result = super::ops::mc_suite(&core, cfg, &tests, 60);
+    let mc_pass = mc_result.as_ref().map(|v| failed_mc_tests(v).is_empty()).unwrap_or(false);
+    let spp_pass = spp_result.as_ref().map(spp_passes_strict).unwrap_or(false);
     let profile_pass = profile_result.as_ref().map(|v| {
         v["profiles"].as_array().map(|profiles| {
             !profiles.is_empty() && profiles.iter().all(|profile| profile["shape"] == "meseta")
@@ -253,6 +233,31 @@ pub fn full(bars: &[Bar], tmpl: Template, params: [f64; 3], cfg: &EngineCfg) -> 
     }).unwrap_or(false);
     let oos_trades = super::ops::wfe_oos_trade_count(bars, tmpl, params, cfg);
     r.fallos = qualification_failures(r.wfe, oos_trades, mc_pass, spp_pass, profile_pass);
+    if !mc_pass {
+        r.fallos.retain(|failure| failure != "al menos una prueba Monte Carlo fallida");
+        r.fallos.extend(mc_result.as_ref().map(|v| failed_mc_tests(v)).unwrap_or_else(|e| {
+            vec![format!("Monte Carlo no evaluable: {e}")]
+        }));
+    }
+    if !spp_pass {
+        r.fallos.retain(|failure| failure != "al menos una prueba SPP no aprobada");
+        r.fallos.push(spp_result.as_ref().ok()
+            .and_then(|v| spp_parameter_result(v))
+            .map(|result| format!(
+                "SPP: perturbación de parámetros {} (impacto {} %)",
+                result["verdict"].as_str().unwrap_or("sin veredicto"),
+                result["impactPct"].as_f64().unwrap_or(0.0),
+            ))
+            .unwrap_or_else(|| spp_result.as_ref().err()
+                .map(|e| format!("SPP no evaluable: {e}"))
+                .unwrap_or_else(|| "SPP: falta el resultado de perturbación de parámetros".into())));
+    }
+    if !profile_pass {
+        r.fallos.retain(|failure| failure != "algún parámetro no alcanza forma meseta");
+        r.fallos.extend(profile_result.as_ref().map(|v| failed_profiles(v)).unwrap_or_else(|e| {
+            vec![format!("Perfil no evaluable: {e}")]
+        }));
+    }
     r.calificado = r.fallos.is_empty();
 
     r.score = round2(0.35 * r.wfe.max(0.0).min(100.0)
@@ -269,6 +274,66 @@ fn profile_score(shape: &str) -> f64 {
         "unimodal" => 60.0,
         _ => 20.0,
     }
+}
+
+fn verdict_score(verdict: &str) -> f64 {
+    match verdict {
+        "pass" => 100.0,
+        "warn" => 50.0,
+        _ => 0.0,
+    }
+}
+
+fn spp_parameter_result(result: &Value) -> Option<&Value> {
+    let results = result["results"].as_array()?;
+    let mut parameter_results = results.iter().filter(|item| item["key"] == "param_permute");
+    let parameter_result = parameter_results.next()?;
+    if parameter_results.next().is_some() {
+        return None;
+    }
+    Some(parameter_result)
+}
+
+// Reversals and random entries are negative controls, not variants expected to
+// preserve the strategy's edge; strict SPP qualifies the parameter perturbation.
+fn spp_passes_strict(result: &Value) -> bool {
+    spp_parameter_result(result)
+        .map(|parameter_result| parameter_result["verdict"] == "pass")
+        .unwrap_or(false)
+}
+
+fn failed_mc_tests(result: &Value) -> Vec<String> {
+    let results = match result["results"].as_array() {
+        Some(results) => results,
+        None => return vec!["Monte Carlo: suite sin resultados".into()],
+    };
+    let mut failures = Vec::new();
+    for test in super::verdicts::MC_TESTS {
+        match results.iter().find(|item| item["test"] == test) {
+            Some(item) if item["passed"] == true => {}
+            Some(_) => failures.push(format!("Monte Carlo: {test}")),
+            None => failures.push(format!("Monte Carlo: {test} sin resultado")),
+        }
+    }
+    if results.len() != super::verdicts::MC_TESTS.len() {
+        failures.push("Monte Carlo: suite incompleta".into());
+    }
+    failures
+}
+
+fn failed_profiles(result: &Value) -> Vec<String> {
+    let profiles = match result["profiles"].as_array() {
+        Some(profiles) if !profiles.is_empty() => profiles,
+        _ => return vec!["Perfil: sin perfiles evaluables".into()],
+    };
+    profiles.iter()
+        .filter(|profile| profile["shape"] != "meseta")
+        .map(|profile| format!(
+            "Perfil fuera de meseta: {} ({})",
+            profile["param"].as_str().unwrap_or("parámetro sin nombre"),
+            profile["shape"].as_str().unwrap_or("sin forma"),
+        ))
+        .collect()
 }
 
 fn strictly_qualified(wfe: f64, oos_trades: u32, mc_pass: bool, spp_pass: bool, profile_pass: bool) -> bool {
@@ -394,5 +459,57 @@ mod tests {
         assert!(failures.iter().any(|failure| failure.contains("Monte Carlo")));
         assert!(failures.iter().any(|failure| failure.contains("SPP")));
         assert!(failures.iter().any(|failure| failure.contains("meseta")));
+    }
+
+    #[test]
+    fn spp_estricto_exige_perturbacion_de_parametros_no_controles_negativos() {
+        let result = json!({
+            "results": [
+                {"key": "entry_reversal", "verdict": "fail"},
+                {"key": "opposite", "verdict": "fail"},
+                {"key": "random_entry", "verdict": "fail"},
+                {"key": "param_permute", "verdict": "pass"}
+            ]
+        });
+        assert!(spp_passes_strict(&result));
+        assert_eq!(verdict_score(spp_parameter_result(&result).unwrap()["verdict"].as_str().unwrap()), 100.0);
+    }
+
+    #[test]
+    fn spp_estricto_falla_si_no_hay_perturbacion_aprobada_o_es_ambigua() {
+        assert!(!spp_passes_strict(&json!({"results": [
+            {"key": "entry_reversal", "verdict": "pass"}
+        ]})));
+        assert!(!spp_passes_strict(&json!({"results": [
+            {"key": "param_permute", "verdict": "warn"}
+        ]})));
+        assert!(!spp_passes_strict(&json!({"results": [
+            {"key": "param_permute", "verdict": "pass"},
+            {"key": "param_permute", "verdict": "pass"}
+        ]})));
+    }
+
+    #[test]
+    fn diagnostico_estricto_identifica_tests_monte_carlo_y_parametros() {
+        let mc = json!({"results": [
+            {"test": "shuffle", "passed": true},
+            {"test": "skip", "passed": false},
+            {"test": "randomize_params", "passed": true},
+            {"test": "drawdown", "passed": true},
+            {"test": "duplicate", "passed": false},
+            {"test": "skip_certain", "passed": true}
+        ]});
+        assert_eq!(
+            failed_mc_tests(&mc),
+            vec!["Monte Carlo: skip", "Monte Carlo: duplicate"]
+        );
+        let profile = json!({"profiles": [
+            {"param": "p1 · Fast", "shape": "meseta"},
+            {"param": "p2 · Slow", "shape": "unimodal"}
+        ]});
+        assert_eq!(
+            failed_profiles(&profile),
+            vec!["Perfil fuera de meseta: p2 · Slow (unimodal)"]
+        );
     }
 }

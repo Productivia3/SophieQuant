@@ -15,12 +15,13 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 | F01-H2 | generar estrategias | dataset EURUSD H1 | seleccionar H1 con datasets M1 y H1; comprobar las fechas mostradas | usa las fechas del dataset H1 y muestra fechas correctas desde timestamps Rust en segundos | e2e | ✓ |
 | F01-H3 | generar estrategias | objetivo no alcanzado | mock de generación completada con 0/10 y diagnóstico guardado | estado COMPLETADO, resumen visible y razones de descarte persistidas tras cargar la ejecución | e2e/Rust | ✓ |
 | F01-R3 | generar estrategias | rechazos y robustez | filtros deliberadamente imposibles y checks estrictos fallidos | desglose independiente por filtro, mínimo de operaciones y motivo de cada validación estricta; conteos solapados identificados | Rust | ✓ |
+| F01-R4 | generar estrategias | búsqueda sin supervivientes/plantilla fija | filtros base imposibles; inspeccionar siguiente generación del generador | muta las mejores candidatas y conserva la exploración; una plantilla fija nunca recibe parámetros por defecto de otra plantilla; no guarda candidatos no calificados | Rust | ✓ |
 | F01-T1 | generar estrategias | contrato Tauri | iniciar desde S02 con `invoke` | configuración enviada dentro de `config` | e2e | ✓ |
 | F01-E1 | generar estrategias | edge: TF sin dataset | alternar entre d1 sin datos y m1 con datos | sin datos: aviso y enlace visibles, controles de plantilla/filtros/robustez ocultos y generación deshabilitada; con datos vuelven a mostrarse | e2e | ✓ |
 | F01-E2 | generar estrategias | edge: doble clic en "Correr build" | doble submit rápido | sin crash, aterriza en S03 | e2e | ✓ |
 | F01-E3 | generar estrategias | edge: refresh mid-build | refrescar S03 mientras el build está activo/pausado | estado y número de pasadas recuperados desde SQLite | Tauri | ✓ (build 4: paused, 15/100 tras refresh; cancelado al acabar) |
 | F01-E4 | generar estrategias | edge: objetivo fuera de rango | nTarget=9 | input clampa a min 10, corre igual | e2e | ✓ |
-| F01-R1 | robustez estricta | unitario | probar límites WFE/OOS y cada check MC, SPP y perfil | solo califica si todos pasan y hay al menos 30 operaciones OOS | Rust | ✓ |
+| F01-R1 | robustez estricta | unitario | probar límites WFE/OOS, MC, perturbación de parámetros SPP y perfiles | califica con WFE ≥50%, 30 operaciones OOS, todas las pruebas MC, perturbación de parámetros aprobada y meseta en cada parámetro activo; los controles negativos SPP son diagnósticos, no requisitos de preservar beneficio | Rust | ✓ |
 | F01-R2 | robustez estricta | edge: evidencia incompleta o dataset distinto | persistencia/lectura del score y veredictos | pendiente, estrategia no calificada o dataset distinto no presenta score vigente | Rust | ✓ |
 | F01-N1 | generar estrategias | negative: build inexistente | /#/build/run/9999 | sin crash (badge pending, 0 pasadas) | e2e | ✓ |
 | F04-H1 | optimizador | Simple | S10 → Simple → Optimizar | tabla por combinación con ejes, PF, drawdown, leyenda y mejor punto | e2e | ✓ |
@@ -90,6 +91,21 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 - Playwright: suite completa, **112/112** correctos tras actualizar una prueba obsoleta. El primer intento tuvo un timeout en H-H1 porque esperaba un resultado SPP del navegador; ahora el navegador bloquea correctamente esos cálculos. Se cambió a H-E1, que verifica el bloqueo y que no se crea una entrada falsa; el spec enfocado pasó **3/3** y la suite completa posterior pasó **112/112**.
 - Los veredictos antiguos se invalidan por versión; las puntuaciones solo se exponen si la estrategia sigue calificada para el mismo dataset.
 - El requisito estricto puede dejar el banco sin estrategias calificadas. La validación en ventana Tauri y con datos reales aún está pendiente; los tests no garantizan rentabilidad futura.
+
+## Revalidación de búsqueda genética (2026-11-18)
+
+- El registro local del build 3 identifica USDJPY H1, plantilla Reversión osciladora, objetivo 10, PF ≥ 1.2, DD ≤ 35 %, Recovery Factor ≥ 1, mínimo 300 operaciones y 4.000 evaluaciones; 0 candidatos superaron los filtros base.
+- Se corrigió la evolución para conservar las mejores candidatas no calificadas cuando no hay supervivientes, manteniendo parte de la población como exploración desde los parámetros por defecto. Los filtros y la calificación estricta no se relajan.
+- Se corrigió además el uso de parámetros por defecto de otra plantilla en generaciones posteriores cuando el usuario fija una plantilla.
+- El resumen incluye ahora los mejores PF/Recovery/operaciones observados durante el entrenamiento, además del desglose de rechazos ya añadido.
+- Rust: **91/91** tests correctos. Playwright de resumen persistido: **1/1**. Retests posteriores muestran resultados distintos con distintas configuraciones; no deben compararse como una misma búsqueda.
+
+## Seguimiento de robustez estricta (2026-11-18)
+
+- El build 4 (antes de esta corrección SPP) fue USDJPY H1 + Cruce de medias, objetivo 10, PF ≥ 1.2, DD ≤ 35 %, Recovery Factor ≥ 1 y mínimo 200 operaciones: 24/24 pasaron filtros base y 0/10 robustez. El build 5, ya con el binario compilado después de los cambios, fue EURUSD H1 + Reversión osciladora, sin filtro Recovery: 0/4008 filtros base y PF máximo 0.47. Como cambian símbolo, plantilla y filtros, el build 5 no vuelve a probar la corrección SPP.
+- Se encontró un error en la calificación SPP: exigía que entradas/salidas invertidas, señales opuestas y entradas aleatorias conservaran casi el mismo beneficio. Son controles negativos y no deben ser requisitos de robustez. La calificación y el componente SPP del score ahora usan la prueba de perturbación de parámetros; Monte Carlo y las mesetas siguen siendo requisitos estrictos.
+- El resumen ahora detalla qué pruebas Monte Carlo y qué parámetros/perfiles no pasan, y diferencia errores de evaluación.
+- Rust focalizado: **10/10** tests de robustez correctos (incluye que los controles negativos no bloqueen la calificación). Sigue pendiente repetir en Tauri la configuración del build 4 para validar SPP con finalistas y obtener el nuevo desglose de Monte Carlo/perfiles.
 
 ## Revalidación del optimizador (2026-11-07)
 
