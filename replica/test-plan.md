@@ -122,6 +122,14 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 - La exportación abre el diálogo nativo de guardado y escribe en la ruta elegida; el command Rust verifica CSV/QFD y tamaño. Falta repetir B6 en la aplicación Tauri; la prueba en navegador confirma que ya no informa falsamente que exportó.
 - Validación de código: `npm run build` correcto; `cargo check` correcto; Rust **84/84**; suite completa de Playwright **113/113**. `cargo build` no pudo reemplazar `sophiequant.exe` por acceso denegado (probablemente está abierto); no se cerró ningún proceso.
 
+## Revalidación Tauri de Fase 0 (2026-11-20)
+
+- C2: dos búsquedas de USDJPY H1 sintético terminaron COMPLETADO con 24/24 en filtros base y 10/10 aprobadas por robustez estricta. Falta probar el filtro deliberadamente exigente y persistencia tras recarga.
+- C4/C6: el Banco mostró 20 estrategias con métricas; la ficha muestra parámetros, métricas, curva y marcador OOS.
+- C5: **falla**; el orden numérico inicial es descendente y el siguiente clic lo cambia a ascendente. BUG-021.
+- C7: progreso completo 20/20; las 20 filas quedaron FAILED. En la ficha revisada se vio WFE 100 %/94 trades OOS, MC 6/6 PASS, SPP FAILED por impacto máximo 171,8 % y perfil 2/2 en meseta. La ficha no cargó los veredictos existentes hasta recalcular; BUG-022.
+- La generación estricta evalúa perturbación de parámetros en SPP, mientras el veredicto independiente evalúa permutaciones de componentes de regla; no son el mismo criterio. Aclarar la diferencia en la interfaz antes de cerrar R0.4/C2.
+
 ## Bugs encontrados y su estado
 
 - BUG-001 (S2) progressbar sin aria-label → **fixed**
@@ -129,8 +137,8 @@ Leyenda: e2e = Playwright sobre la UI web · Rust = unit/integration test del mo
 - BUG-003 (test) selector ambiguo → **fixed in test**
 - BUG-004 (S3) tablas sin contenedor de scroll en móvil → **fixed**
 - BUG-005 (S3) sidebar no colapsa en móvil → **fixed** (drawer móvil, tests X-BUG005-1/2)
-- Detalles en `replica/bugs.md`. No hay S1/S2 abiertos → nada bloquea continuar por esta vía.
+- BUG-021 y BUG-022 son S3 abiertos; los detalles están en `replica/bugs.md`. No hay S1/S2 abiertos.
 
 ## Límite de verificación nativa
 
-No se abrió el diálogo nativo de archivos ni se usó un CSV personal. El command real de importación se verificó con un fichero sintético aislado. Para uso personal, todavía se puede hacer un pase visual del selector nativo y de los avisos de calidad con un CSV propio; no es un bloqueo para el flujo backend validado.
+No se abrió el diálogo nativo de archivos ni se usó un CSV personal. El command real de importación se verificó con un fichero sintético aislado. Para uso personal, todavía se puede hacer un pase visual del selector nativo y de los avisos de calidad con un CSV propio; no es un bloqueo para el flujo backend validado. Para R0.6 se facilitaron carpetas para ticks e informes, pero no contienen ficheros visibles en este entorno; la carpeta disponible se llama `Datos/Informe` (singular), no `Datos/Informes`. No se inspeccionaron los CSV de la raíz de `Datos`.

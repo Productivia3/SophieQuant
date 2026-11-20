@@ -105,6 +105,30 @@ sus dependencias.
 **Gate de fase:** alcance y línea base aprobados; no hay requisitos sin prueba
 asignada.
 
+**Seguimiento inicial (2026-11-20):** matriz de aceptación en
+[`replica/acceptance-matrix.md`](replica/acceptance-matrix.md) y evidencia/
+pendientes en [`replica/phase0-baseline.md`](replica/phase0-baseline.md).
+Automatización Windows inicial: Rust 94/94, Playwright 115/115 y build frontend
+correctos. R0.1, R0.2, R0.3, R0.4 y R0.5 siguen parciales; R0.6 está bloqueado
+hasta disponer del tick export y del reporte reproducible de MT5. La Fase 0 no
+está cerrada.
+
+**Actualización Fase 0 (2026-11-20):** se ejecutó Tauri con el perfil aislado
+`com.sophiequant.qa`. En fixtures sintéticas pasaron B1/B2/B6/C1; la exportación
+CSV fue verificada en disco y se importaron 43.000 barras H1 sin filas
+descartadas ni alertas de calidad. Dos búsquedas de 10 objetivos con robustez
+estricta guardaron 10/10 y dieron el mismo resumen; la segunda incluyó muestreo
+de recursos aproximadamente cada segundo. En el Banco, C4/C6 pasaron sus
+criterios; C5 falló por dirección inicial de orden (BUG-021) y C7 completó
+20/20 con resultados FAILED, aunque la ficha no cargó los veredictos previos
+(BUG-022).
+La línea
+base y los pendientes están en
+[`replica/phase0-baseline.md`](replica/phase0-baseline.md); la matriz refleja el
+avance. R0.5 aún requiere benchmark Linux y acordar el presupuesto con mediciones
+comparables. R0.6 sigue bloqueado hasta disponer del tick feed y el reporte de
+MT5 en ubicación de QA.
+
 ### Fase 1 — Modelo de órdenes y motor long/short
 
 **Dependencias:** R0.4.  

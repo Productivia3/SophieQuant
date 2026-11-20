@@ -226,6 +226,37 @@ en el burger, cierre al navegar. Tests: `f-phase4.spec.ts` X-BUG005-1/2 + axe m�
 - Evidence: el resumen de búsqueda y el flujo de `current_gen` en `src-tauri/src/engine/genetic.rs`; tests nuevos verifican elites, uso como padres y coherencia plantilla/parámetros. La inspección local de `builds.config` identificó que el resultado 24/24 fue USDJPY H1 + Cruce de medias, mientras que el posterior 0/4008 fue EURUSD H1 + Reversión osciladora; difieren símbolo, plantilla y filtros. El segundo se ejecutó con el binario compilado después del cambio, por lo que no es prueba de una regresión con configuración equivalente.
 - Status: **fix implemented; equivalent-config retest pending** — se conserva un archivo de hasta 24 mejores candidatas según criterios y proximidad normalizada, se mutan entre generaciones manteniendo exploración desde parámetros por defecto, y la plantilla fija usa sus propios parámetros. El resumen añade mejores métricas observadas. Para validar el cambio y el ajuste SPP, falta repetir el build 4 con idénticos símbolo, timeframe, plantilla y filtros; no se garantiza que EURUSD H1 + Reversión osciladora produzca estrategias que cumplan.
 
+### BUG-021: el primer ordenamiento numérico del Banco es descendente
+
+- Severity: S3 (el comportamiento contradice la guía; requiere un clic adicional para volver a la dirección esperada).
+- Flow / case: Banco de estrategias / C5.
+- Screen / build: Banco, Tauri QA, `d1f6a72` (`main`), Windows.
+
+Steps
+1. Abrir el Banco con las 20 estrategias sintéticas USDJPY H1 del perfil QA.
+2. Pulsar una vez la columna **Beneficio neto** y observar las primeras filas.
+3. Pulsarla por segunda y tercera vez.
+
+Expected: el primer clic ordena ascendente y el segundo descendente.
+Actual: el primer clic ordena descendente (mayor beneficio primero), el segundo ascendente y el tercero descendente.
+Evidence: árbol de accesibilidad de Tauri; primera fila $384,486 tras el primer clic y $368,547 tras el segundo. `src/pages/index.tsx` inicializa en ascendente solo nombre/símbolo/TF/DD y en descendente las demás columnas numéricas.
+Status: **open** — reproducido; no corregido en esta pasada de línea base.
+
+### BUG-022: la ficha no carga los veredictos ya calculados desde el Banco
+
+- Severity: S3 (muestra un estado vacío incorrecto; se puede recalcular desde la ficha).
+- Flow / case: Banco y ficha de estrategia / C6–C7.
+- Screen / build: Banco y detalle de estrategia, Tauri QA, `d1f6a72` (`main`), Windows.
+
+Steps
+1. En el Banco QA, calcular veredictos para todas las estrategias y esperar a 20/20.
+2. Abrir una estrategia que muestre `FAILED` en la tabla.
+
+Expected: la ficha carga el veredicto ya guardado y sus pruebas/detalles.
+Actual: la ficha dice «Todavía no hay veredictos calculados para estas estrategias» y ofrece calcularlos. Al pulsar calcular, muestra el resultado de esa estrategia.
+Evidence: tabla del Banco con estados `FAILED`; detalle vacío hasta recalcular. `src/components/VerdictCard.tsx` solo consulta `listVerdicts` cuando `load(false)` se invoca, pero el montaje no lo llama.
+Status: **open** — reproducido; la ficha se actualiza al recalcular manualmente.
+
 ### Límite manual restante
 
 - No se automatizó el diálogo nativo de selección de fichero ni se usaron datos personales. La importación se verificó llamando al command Tauri real con un CSV sintético de 800 barras.
